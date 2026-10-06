@@ -1,4 +1,5 @@
 // Checks the survey rules (worker/src/survey.js) and the item list (worker/src/items.js).  node test/test_survey.mjs
+import fs from 'node:fs';
 import * as sv from '../worker/src/survey.js';
 import { COMPETENCIES, ITEMS, LEVELS, NA_TEXT } from '../worker/src/items.js';
 
@@ -68,6 +69,23 @@ const v = sv.studentView(s, 'bo@montclair.edu', [{ round: 'start', answers: { 'c
 ok(v.authorized && v.name === 'Bo Abe' && v.competencies.length === 7 && !v.competencies.some(c => c.code === 'equity') && v.competencies[0].dims[0].levels.length === 4, 'student view lists the competencies turned on, with their text');
 ok(v.rounds[0].open && v.rounds[0].answers['career.strengths'] === 2 && !v.rounds[1].open && v.rounds[1].saved === '', 'student view: round status and own answers');
 ok(sv.studentView(s, 'stranger@x.edu', [], T0).authorized === false && !('rounds' in sv.studentView(s, 'stranger@x.edu', [], T0)), 'a stranger sees nothing');
+ok(v.needCode === true && v.rounds[0].started === true && v.rounds[1].started === false, 'student view: session code needed, a round with a stored row is started');
+
+// session code: 4 digits from the secret and the 30-second slot; the current and the previous code are accepted
+ok(s.code === true && /^[0-9a-f]{32}$/.test(s.secret) && sv.newClass('x', T0).secret !== s.secret, 'new class: code required, random secret');
+ok(sv.CODE_MS === 30000 && sv.codeSlot(T0 + 29999) === sv.codeSlot(T0) && sv.codeSlot(T0 + 30000) === sv.codeSlot(T0) + 1, '30-second slots');
+const slot = sv.codeSlot(T0), codes = [-2, -1, 0, 1].map(k => sv.sessionCode(s, slot + k));
+ok(codes.every(c => /^\d{4}$/.test(c)) && sv.sessionCode(s, slot) === codes[2] && sv.sessionCode({ secret: 'other' }, slot) !== codes[2], 'codes are 4 digits, fixed per slot, differ by secret');
+sv.checkCode(s, codes[2], T0); sv.checkCode(s, ' ' + codes[1] + ' ', T0);
+ok(true, 'current and previous code accepted');
+if (codes[0] !== codes[1] && codes[0] !== codes[2]) throws(() => sv.checkCode(s, codes[0], T0), /changes every 30 seconds/, 'a code two slots old refused');
+if (codes[3] !== codes[1] && codes[3] !== codes[2]) throws(() => sv.checkCode(s, codes[3], T0), /Wrong session code/, 'the next code refused');
+throws(() => sv.checkCode(s, '', T0), /Wrong session code/, 'empty code refused');
+ok(sv.upgrade({ title: 'x' }).code === true && sv.upgrade({ title: 'x', code: false }).code === false, 'upgrade: code required unless turned off');
+// the instructor page's copy of sessionCode gives the same codes
+const admin = fs.readFileSync(new URL('../docs/survey_admin.html', import.meta.url), 'utf8');
+const copy = new Function(admin.match(/function sessionCode\(secret, slot\) \{[\s\S]*?\n  \}/)[0] + '; return sessionCode;')();
+ok([0, 1, 2, 999, 123456].every(k => copy(s.secret, slot + k) === sv.sessionCode(s, slot + k)) && /var CODE_MS = 30000;/.test(admin), 'the instructor page computes the same codes');
 
 // settings: equity can be turned on, at least one competency stays on
 sv.ADMIN.saveSettings(s, { off: [] });
@@ -78,7 +96,9 @@ throws(() => sv.ADMIN.saveSettings(s, { off: ['bogus'] }), /Unknown competency/,
 throws(() => sv.ADMIN.saveSettings(s, { off: COMPETENCIES.map(c => c.code) }), /at least one/i, 'turning all off refused');
 throws(() => sv.ADMIN.saveSettings(s, { title: ' ' }), /title/, 'empty title refused');
 sv.ADMIN.saveSettings(s, { title: 'New title' });
-ok(s.title === 'New title' && s.off.join() === 'equity,teamwork', 'title alone changes only the title');
+ok(s.title === 'New title' && s.off.join() === 'equity,teamwork' && s.code === true, 'title alone changes only the title');
+sv.ADMIN.saveSettings(s, { code: false });
+ok(s.code === false && sv.studentView(s, 'bo@montclair.edu', [], T0).needCode === false, 'session code turned off');
 
 console.log('passed', pass, 'failed', fail);
 process.exit(fail ? 1 : 0);

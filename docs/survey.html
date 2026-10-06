@@ -25,15 +25,21 @@
     .banner.note { background: #eef4fb; color: var(--ink); border: 1px solid #c9dbf0; }
     .standby { padding: 22px 16px; border-radius: 12px; background: #f0f2f5; color: var(--muted); text-align: center; font-size: 18px; margin-top: 16px; }
     .levels { display: grid; gap: 8px; }
-    .opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 2px solid var(--line); border-radius: 10px;
+    .opt { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border: 2px solid var(--line); border-radius: 10px;
            background: #fff; cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%; }
     .opt:hover { border-color: #a9b8c8; }
-    .opt .n { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); display: flex;
-              align-items: center; justify-content: center; font-weight: 700; color: var(--muted); }
-    .opt .t b { display: block; font-size: 14px; color: var(--muted); font-weight: 600; }
+    /* The marker column has one width for 1 to 4 and N/A, so every description starts at the same place. */
+    .opt .mk { flex: none; width: 44px; text-align: center; }
+    .opt .n { display: inline-flex; min-width: 30px; height: 30px; padding: 0 5px; border-radius: 15px; border: 2px solid var(--line);
+              align-items: center; justify-content: center; font-size: 15px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+    .opt .t { padding-top: 3px; }
+    .opt .t b { font-weight: 700; color: var(--ink); }
     .opt.on { border-color: var(--accent); background: #e7f0fb; }
     .opt.on .n { background: var(--accent); border-color: var(--accent); color: #fff; }
     .opt.on .t b { color: var(--accent); }
+    .code { display: block; width: 180px; margin: 0 auto 14px; padding: 10px; font-size: 32px; letter-spacing: 10px; text-align: center;
+            border: 2px solid var(--line); border-radius: 10px; font-family: inherit; }
+    .codelabel { text-align: center; margin-bottom: 12px; }
     .item { padding-top: 2px; scroll-margin-top: 16px; }
     .item.missing h3 { color: var(--warn); }
     .item.missing .opt { border-color: #f3c1bc; }
@@ -341,6 +347,11 @@
     }
     app.appendChild(el('h2', { style: 'margin-top:14px', text: 'Competency self-assessment: ' + r.name.toLowerCase() }));
     if (done) app.appendChild(el('div', { class: 'banner ok', text: done }));
+    if (S.needCode && !r.started) {
+      bar.hidden = true;
+      app.appendChild(codeCard(r));
+      return;
+    }
     if (r.submitted) {
       app.appendChild(el('div', { class: 'banner note', text: 'You submitted this survey on ' + when(r.submitted) + '. You can change answers and submit again'
         + (r.closes ? ' until ' + when(r.closes) + '.' : ' while the survey is open.') }));
@@ -371,7 +382,35 @@
   function option(id, value, mark, label, text) {
     return el('button', { type: 'button', class: 'opt' + (String(draft[id]) === String(value) ? ' on' : ''), 'data-v': String(value),
                           on: { click: function () { choose(id, value); } } },
-      el('span', { class: 'n', text: mark }), el('span', { class: 't' }, el('b', { text: label }), text));
+      el('span', { class: 'mk' }, el('span', { class: 'n', text: mark })), el('span', { class: 't' }, el('b', { text: label + ': ' }), text));
+  }
+
+  /** Before a round is started: the session code shown on the instructor's screen (it changes every 30 seconds). */
+  function codeCard(r) {
+    var msg = el('div', { class: 'banner err', hidden: true });
+    var input = el('input', { class: 'code', inputmode: 'numeric', autocomplete: 'off', maxlength: '4', 'aria-label': 'Session code' });
+    var go = el('button', { class: 'go', text: 'Start' });
+    function start() {
+      var code = input.value.replace(/\D/g, '');
+      if (code.length !== 4) { msg.textContent = 'Type the 4 digits shown on the screen.'; msg.hidden = false; return; }
+      go.disabled = true; msg.hidden = true;
+      api('unlock', [r.id, code]).then(function (s) {
+        S = s; var x = cur();
+        draft = Object.assign({}, x.answers); savedAt = x.saved; dirty = false; done = '';
+        render(); window.scrollTo(0, 0);
+      }).catch(function (e) {
+        go.disabled = false;
+        if (e.message === 'SIGNIN') return;
+        msg.textContent = e.message; msg.hidden = false;
+        if (/closed/.test(e.message)) load();
+        input.select();
+      });
+    }
+    go.addEventListener('click', start);
+    input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') start(); });
+    setTimeout(function () { input.focus(); }, 0);
+    return el('div', { class: 'card', style: 'text-align:center' },
+      el('p', { class: 'codelabel', text: 'Type the session code shown on the screen. It changes every 30 seconds.' }), input, go, msg);
   }
 
   function statusList() {

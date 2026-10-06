@@ -3,6 +3,7 @@
  *
  * State of a class:
  *   { title, created, roster: [{first, last, email}], off: [competency codes turned off],
+ *     code: whether a student types the session code to start a round, secret: random string the codes derive from,
  *     rounds: [{id: 'start' | 'end', name, open: bool, closes: ISO time or '', openedAt, closedAt}] }
  * A round is open while open is true and its closing time (if any) has not passed.
  * A student's answers to a round are one row of the responses table: answers = {itemId: 1..4 or 'na'},
@@ -21,14 +22,51 @@ const text = s => String(s ?? '').trim();
 export const fullName = r => (r.first + ' ' + r.last).trim();
 
 export function newClass(title, now) {
-  return { title: text(title), created: iso(now), roster: [], off: DEFAULT_OFF.slice(),
+  return { title: text(title), created: iso(now), roster: [], off: DEFAULT_OFF.slice(), code: true, secret: randomSecret(),
            rounds: ROUNDS.map(r => ({ id: r.id, name: r.name, open: false, closes: '', openedAt: '', closedAt: '' })) };
 }
 
-/** Fills fields a class saved by an earlier version lacks. */
+export function randomSecret() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The 4-digit session code shown with the QR code. A student types it once to start a survey round
+ * (when the class requires it, s.code), which shows the student was in the room when the survey began.
+ * It changes every CODE_MS (30 s): a hash of the class's secret and the 30-second slot, so it cannot
+ * be guessed from earlier codes. The instructor page computes it with a copy of this function (it
+ * receives the secret and the server clock); the Worker accepts the current slot and the previous one,
+ * so a code is valid for 30 to 60 seconds after it appears. (cyrb53 hash, as in the attendance tool.)
+ */
+export const CODE_MS = 30000;
+export const codeSlot = ms => Math.floor(ms / CODE_MS);
+export function sessionCode(s, slot) {
+  const str = String(s.secret || '') + '|' + slot;
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const n = 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  return String(n % 10000).padStart(4, '0');
+}
+
+/** Checks a typed session code: the current 30-second code or the previous one. */
+export function checkCode(s, code, nowMs) {
+  const typed = String(code ?? '').trim(), slot = codeSlot(nowMs);
+  if (typed !== sessionCode(s, slot) && typed !== sessionCode(s, slot - 1)) {
+    throw new Error('Wrong session code. The code changes every 30 seconds: type the one on the screen now.');
+  }
+}
+
+/** Fills fields a class saved by an earlier version lacks (a missing secret is created by the Worker, which writes it back). */
 export function upgrade(s) {
   if (!Array.isArray(s.roster)) s.roster = [];
   if (!Array.isArray(s.off)) s.off = DEFAULT_OFF.slice();
+  if (typeof s.code !== 'boolean') s.code = true;
   if (!Array.isArray(s.rounds)) s.rounds = [];
   ROUNDS.forEach(r => { if (!s.rounds.some(x => x.id === r.id)) s.rounds.push({ id: r.id, name: r.name, open: false, closes: '', openedAt: '', closedAt: '' }); });
   return s;
@@ -74,10 +112,11 @@ export function studentView(s, email, rows, ms) {
   return {
     authorized: true, email: me.email, name: fullName(me), title: s.title,
     levels: LEVELS, naText: NA_TEXT,
+    needCode: !!s.code,  // a round is started by typing the session code; a round with a stored row is started
     competencies: activeCompetencies(s).map(c => ({ code: c.code, name: c.name, definition: c.definition, dims: c.dims })),
     rounds: s.rounds.map(r => {
       const row = mine(r.id);
-      return { id: r.id, name: r.name, open: isOpen(r, ms), closes: r.closes,
+      return { id: r.id, name: r.name, open: isOpen(r, ms), closes: r.closes, started: !!row,
                answers: row ? row.answers : {}, saved: row ? row.saved : '', submitted: row ? row.submitted : '' };
     })
   };
@@ -104,9 +143,10 @@ export const ADMIN = {
     s.roster.splice(s.roster.indexOf(st), 1);
   },
 
-  /** settings: {title, off: [competency codes turned off]}. */
+  /** settings: {title, off: [competency codes turned off], code: whether students type the session code to start}. */
   saveSettings(s, settings) {
     const o = settings || {};
+    if ('code' in o) s.code = !!o.code;
     if ('title' in o) {
       if (!text(o.title)) throw new Error('The class needs a title.');
       s.title = text(o.title);

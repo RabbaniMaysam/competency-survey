@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import * as sv from '../worker/src/survey.js';
 
 const API = process.env.API || 'http://127.0.0.1:8791';
 // The Worker keeps the public key it fetched for an hour, so the test key is kept between runs.
@@ -94,6 +95,22 @@ ok(/closed/.test((await stu(1, 'save', ['start', { 'career.strengths': 2 }])).er
 // open the start round; draft, submit, change
 r = await adm('openRound', ['start', '']);
 ok(r.ok && r.data.open.join() === 'start' && r.data.state.rounds[0].openedAt, 'start round opened');
+
+// session code: required by default, typed once per round
+const secret = r.data.secret;
+ok(r.data.state.code === true && /^[0-9a-f]{32}$/.test(secret) && !('secret' in r.data.state) && Math.abs(Date.parse(r.data.now) - Date.now()) < 5000, 'the secret and the server clock are sent apart from the state');
+ok(/session code first/.test((await stu(1, 'save', ['start', { 'career.strengths': 2 }])).error), 'saving refused before the session code');
+r = await stu(1, 'state');
+ok(r.state.needCode === true && r.state.rounds[0].started === false, 'the student page asks for the code');
+const slotNow = sv.codeSlot(Date.now()), good = sv.sessionCode({ secret: secret }, slotNow);
+const near = [-1, 0, 1].map(k => sv.sessionCode({ secret: secret }, slotNow + k));
+const wrong = ['0000', '1111', '2222', '3333'].find(c => near.indexOf(c) === -1);
+ok(/Wrong session code/.test((await stu(1, 'unlock', ['start', wrong])).error), 'wrong code refused');
+ok(/not on the class roster/.test((await stu(9, 'unlock', ['start', good])).error), 'a stranger cannot start with the right code');
+ok(/closed/.test((await stu(1, 'unlock', ['end', good])).error), 'a closed round cannot be started');
+r = await stu(1, 'unlock', ['start', good]);
+ok(r.ok && r.state.rounds[0].started === true && Object.keys(r.state.rounds[0].answers).length === 0, 'right code starts the round');
+ok((await stu(1, 'unlock', ['start', good])).ok, 'typing the code again is harmless');
 r = await stu(1, 'save', ['start', { 'career.strengths': 2, 'equity.perspectives': 3 }]);
 ok(r.ok && r.state.rounds[0].answers['career.strengths'] === 2 && !('equity.perspectives' in r.state.rounds[0].answers) && r.state.rounds[0].saved && !r.state.rounds[0].submitted, 'draft saved; equity answer dropped');
 ok(/not valid/.test((await stu(1, 'save', ['start', { 'career.strengths': 7 }])).error), 'invalid level refused');
@@ -108,7 +125,9 @@ r = await stu(1, 'submit', ['start', Object.assign({}, all, { [items[1]]: 4 })])
 ok(r.ok && r.state.rounds[0].submitted === first && r.state.rounds[0].answers[items[1]] === 4, 'changes submitted; the first submission time is kept');
 ok(/not on the class roster/.test((await stu(9, 'save', ['start', all])).error), 'a stranger cannot save');
 ok(/closed/.test((await stu(2, 'save', ['end', all])).error), 'the end round is closed');
-await stu(2, 'save', ['start', { 'career.strengths': 1 }]);
+r = await adm('saveSettings', [{ code: false }]);
+ok(r.ok && r.data.state.code === false && (await stu(2, 'state')).state.needCode === false, 'session code turned off');
+ok((await stu(2, 'save', ['start', { 'career.strengths': 1 }])).ok, 'without the code requirement a student saves directly');
 
 // equity turned on: student 1 now has 3 items missing; turned off again, the answers are kept
 r = await adm('saveSettings', [{ title: 'Survey test 2', off: [] }]);
@@ -153,9 +172,10 @@ ok(r.ok && r.data.state.roster.some(x => x.email === 'ash1@montclair.edu'), 'stu
 // export and log
 r = await adm('export');
 ok(r.ok && r.data.state.title === 'Survey test 2' && r.data.responses.length === 2 && r.data.log.length > 5, 'export holds the state, responses, and log');
+ok(!JSON.stringify(r.data).includes(secret), 'export leaves out the secret');
 const lg = (await adm('log', ['', 'all', 5000])).data.rows;
 const acts = lg.map(x => x.action);
-['create class', 'import roster', 'open', 'close', 'set closing time', 'save settings', 'delete answers', 'remove student', 'add student', 'start', 'submit', 'submit changes', 'refused: save', 'refused: submit', 'refused: closeRound']
+['create class', 'import roster', 'open', 'close', 'set closing time', 'save settings', 'delete answers', 'remove student', 'add student', 'start', 'submit', 'submit changes', 'refused: save', 'refused: submit', 'refused: unlock', 'refused: closeRound']
   .forEach(a => ok(acts.indexOf(a) !== -1, 'logged: ' + a));
 ok(acts.indexOf('export') === -1 && acts.indexOf('get') === -1 && acts.indexOf('state') === -1, 'reads are not logged');
 ok(lg.filter(x => x.action === 'start').length === 3, 'a draft start is logged once per student and round');

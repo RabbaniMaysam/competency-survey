@@ -3,7 +3,7 @@
  * The pages in docs/ (GitHub Pages) call it. See README.md.
  *
  *   GET  /config  -> {clientId, classes, sessions}      public, needed before sign-in
- *   POST /survey  -> student page: {token, class, action: 'state' | 'save' | 'submit', args: [round, answers]} -> {ok, state}
+ *   POST /survey  -> student page: {token, class, action: 'state' | 'unlock' | 'save' | 'submit', args: [round, answers or code]} -> {ok, state}
  *   POST /admin   -> instructor page: {token, class, action, args}                                           -> {ok, data}
  *
  * Settings and roster are one JSON row per class (classes); each student's answers to a round are one
@@ -156,8 +156,17 @@ async function classList(env) {
 async function readClass(env, key) {
   const row = await env.DB.prepare('SELECT state FROM classes WHERE key = ?').bind(key).first();
   if (!row) throw new Error('This link does not match any class.');
-  return sv.upgrade(JSON.parse(row.state));
+  const s = sv.upgrade(JSON.parse(row.state));
+  // A class saved before session codes existed receives its secret on first use.
+  if (!s.secret) {
+    s.secret = sv.randomSecret();
+    await writeClass(env, key, s);
+  }
+  return s;
 }
+
+/** The state without the secret the session codes derive from (the instructor page receives it separately). */
+const shownState = s => { const o = Object.assign({}, s); delete o.secret; return o; };
 
 const writeClass = (env, key, s) => env.DB.prepare('UPDATE classes SET state = ? WHERE key = ?').bind(JSON.stringify(s), key).run();
 const logRow = (env, key, actor, action, detail) => env.DB.prepare(LOG_SQL)
@@ -171,12 +180,22 @@ async function studentCall(env, real, action, key, args) {
   const now = Date.now();
   const mineSql = 'SELECT round, answers, saved, submitted FROM responses WHERE class = ? AND email = ?';
   try {
-    if (action === 'save' || action === 'submit') {
+    if (action === 'unlock') {
+      // The student types the session code shown on the instructor's screen; a row with no answers starts the round.
+      if (!sv.student(s, real)) throw new Error('This account is not on the class roster.');
+      const r = sv.round(s, args[0]);
+      if (!sv.isOpen(r, now)) throw new Error('The ' + r.name.toLowerCase() + ' survey is closed.');
+      sv.checkCode(s, args[1], now);
+      const res = await env.DB.prepare("INSERT OR IGNORE INTO responses (class, round, email, answers, saved, submitted) VALUES (?, ?, ?, '{}', ?, '')")
+        .bind(key, r.id, real, new Date(now).toISOString()).run();
+      if (res.meta.changes) await logRow(env, key, real, 'start', r.name);
+    } else if (action === 'save' || action === 'submit') {
       if (!sv.student(s, real)) throw new Error('This account is not on the class roster.');
       const r = sv.round(s, args[0]);
       if (!sv.isOpen(r, now)) throw new Error('The ' + r.name.toLowerCase() + ' survey is closed.');
       const answers = sv.cleanAnswers(s, args[1]);
       const prev = await env.DB.prepare('SELECT answers, submitted FROM responses WHERE class = ? AND round = ? AND email = ?').bind(key, r.id, real).first();
+      if (s.code && !prev) throw new Error('Type the session code first.');
       if (action === 'save' && prev && prev.submitted) throw new Error('Your answers are submitted. Change them with "Submit changes".');
       if (action === 'submit') {
         const left = sv.missing(s, answers);
@@ -268,7 +287,7 @@ async function adminDo(env, real, who, action, key, args) {
 
   // Everything stored about the class, for a full download.
   if (action === 'export') {
-    return { exportedAt: new Date(now).toISOString(), key: key, state: s, responses: await allRows(),
+    return { exportedAt: new Date(now).toISOString(), key: key, state: shownState(s), responses: await allRows(),
              log: (await env.DB.prepare('SELECT id, time, actor, action, detail FROM log WHERE class = ? ORDER BY id').bind(key).all()).results };
   }
 
@@ -290,11 +309,12 @@ async function adminDo(env, real, who, action, key, args) {
     await writeClass(env, key, s);
     logs.push(['remove student', shown]);
   } else if (action === 'saveSettings') {
-    const before = JSON.stringify({ title: s.title, off: s.off });
+    const before = JSON.stringify({ title: s.title, off: s.off, code: s.code });
     sv.ADMIN.saveSettings(s, args[0]);
     await writeClass(env, key, s);
-    const after = JSON.stringify({ title: s.title, off: s.off });
-    if (after !== before) logs.push(['save settings', 'title: ' + s.title + '; turned off: ' + (s.off.map(c => COMPETENCIES.find(x => x.code === c).name).join(', ') || 'none')]);
+    const after = JSON.stringify({ title: s.title, off: s.off, code: s.code });
+    if (after !== before) logs.push(['save settings', 'title: ' + s.title + '; turned off: ' + (s.off.map(c => COMPETENCIES.find(x => x.code === c).name).join(', ') || 'none')
+      + '; session code: ' + (s.code ? 'required' : 'not required')]);
   } else if (action === 'openRound') {
     sv.ADMIN.openRound(s, args[0], args[1], now);
     await writeClass(env, key, s);
@@ -321,6 +341,7 @@ async function adminDo(env, real, who, action, key, args) {
     const time = new Date().toISOString();
     await env.DB.batch(logs.map(l => env.DB.prepare(LOG_SQL).bind(time, key, who, l[0], String(l[1]).slice(0, 2000))));
   }
-  return { state: s, responses: await allRows(), competencies: COMPETENCIES, items: ITEMS, levels: LEVELS,
+  // secret and now let the page compute the session code shown with the QR code (sv.sessionCode).
+  return { state: shownState(s), secret: s.secret, responses: await allRows(), competencies: COMPETENCIES, items: ITEMS, levels: LEVELS,
            open: s.rounds.filter(r => sv.isOpen(r, now)).map(r => r.id), now: new Date(now).toISOString() };
 }

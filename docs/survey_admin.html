@@ -61,6 +61,17 @@
     .modal p { margin: 0 0 8px; }
     .modal .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     button.danger.solid { background: var(--warn); color: #fff; }
+    .qrveil { background: #fff; flex-direction: column; cursor: pointer; text-align: center; }
+    .qrveil h1 { font-size: 34px; margin: 0 0 12px; }
+    .qr { width: min(70vh, 90vw); height: min(70vh, 90vw); }
+    .qr svg { width: 100%; height: 100%; display: block; }
+    .qrurl { font-size: 26px; margin: 14px 0 4px; word-break: break-all; }
+    .qrstatus { font-size: 22px; margin: 0 0 6px; color: var(--ok); }
+    .qrcode { font-size: 44px; font-weight: 700; margin: 6px 0; letter-spacing: 4px; }
+    .qrcode small { font-size: 22px; font-weight: 500; letter-spacing: 0; color: var(--muted); margin-right: 12px; }
+    /* the bar beside the session code: full when a new code appears, empty when it changes (30 seconds) */
+    .codebar { display: inline-block; width: 140px; height: 14px; margin-left: 16px; vertical-align: middle; border-radius: 7px; background: #e3e7ec; overflow: hidden; }
+    .codebar div { height: 100%; background: var(--accent); border-radius: 7px; }
   </style>
 </head>
 <body>
@@ -72,11 +83,13 @@
   var API = (window.SURVEY_API || '').replace(/\/+$/, '');
   var TOKEN_KEY = 'survey_admin_token';  // this tool's own key: other tools' pages share the origin and keep their own tokens
   var TZ = 'America/New_York';
-  var TABS = ['Overview', 'Responses', 'Results', 'Settings', 'Roster', 'Log'];
+  var TABS = ['Overview', 'QR code', 'Responses', 'Results', 'Settings', 'Roster', 'Log'];
   var token = '', me = '', classes = [], cur = '', D = null, tab = 'Overview';
   var flash = null, busy = false, timer = null, openRow = '';
+  // survey_admin.html?qr=KEY is the QR screen of that class in its own tab (for the projector); see qrPage.
+  var qrMode = new URLSearchParams(location.search).get('qr') || '';
   // The token is kept in localStorage: the Worker's session token (sent after a Google sign-in) lasts months. "Sign out" deletes it.
-  try { token = localStorage.getItem(TOKEN_KEY) || ''; cur = new URLSearchParams(location.search).get('c') || sessionStorage.getItem('survey_admin_class') || ''; } catch (e) {}
+  try { token = localStorage.getItem(TOKEN_KEY) || ''; cur = qrMode || new URLSearchParams(location.search).get('c') || sessionStorage.getItem('survey_admin_class') || ''; } catch (e) {}
 
   // ---------------------------------------------------------------- plumbing
 
@@ -106,6 +119,26 @@
     try { sessionStorage.setItem('survey_admin_class', cur); } catch (e) {}
   }
 
+  // Every "get" response carries the server's clock; the session codes are computed on the server's time, not the PC's.
+  var clockOffset = 0;
+  function setD(d) { D = d; if (d && d.now) clockOffset = Date.parse(d.now) - Date.now(); }
+  function serverNow() { return Date.now() + clockOffset; }
+
+  // The session code: a copy of sessionCode in worker/src/survey.js (cyrb53 hash of the class's secret and the 30-second slot).
+  var CODE_MS = 30000;
+  function sessionCode(secret, slot) {
+    var str = String(secret || '') + '|' + slot, h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (var i = 0; i < str.length; i++) {
+      var ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    var n = 4294967296 * (2097151 & h2) + (h1 >>> 0);
+    return String(n % 10000).padStart(4, '0');
+  }
+
   function call(action, args, key) {
     return fetch(API + '/admin', { method: 'POST',
       body: JSON.stringify({ token: token, class: key === undefined ? cur : key, action: action, args: args || [] }) })
@@ -128,7 +161,7 @@
   function run(action, args, okText) {
     busy = true; flash = null; render();
     call(action, args).then(function (d) {
-      busy = false; D = d; flash = okText ? { ok: okText } : null;
+      busy = false; setD(d); flash = okText ? { ok: okText } : null;
       render();
       if (action === 'saveSettings') refreshClasses();
     }).catch(fail);
@@ -141,20 +174,22 @@
   function loadClass(quiet) {
     if (!cur) { render(); return; }
     call('get').then(function (d) {
-      D = d;
+      setD(d);
       // A quiet refresh leaves a form the instructor is typing in alone.
       var a = document.activeElement, typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'checkbox';
       if (!busy && !(quiet && typing)) render();
     }).catch(function (e) { if (!quiet) fail(e); });
   }
 
-  // The Overview, Responses, and Results tabs refresh every 30 seconds, so new submissions appear.
+  // The Overview, Responses, and Results tabs refresh every 30 seconds, so new submissions appear; the QR code tab
+  // and the QR screen every 10 seconds, for their submission count.
   function poll() {
     clearTimeout(timer);
+    var qr = qrMode || tab === 'QR code';
     timer = setTimeout(function () {
-      if ((tab === 'Overview' || tab === 'Responses' || tab === 'Results') && cur && !document.hidden) loadClass(true);
+      if ((qr || tab === 'Overview' || tab === 'Responses' || tab === 'Results') && cur && !document.hidden) loadClass(true);
       poll();
-    }, 30000);
+    }, qr ? 10000 : 30000);
   }
 
   function start() {
@@ -273,7 +308,7 @@
 
   // Unsaved edits on the Settings tab: kept in settingsDraft across redraws, and checked before the tab, class, or sign-in changes.
   var settingsDraft = null;
-  function settingsOf(S) { return { title: S.title, off: S.off.slice() }; }
+  function settingsOf(S) { return { title: S.title, off: S.off.slice(), code: !!S.code }; }
   function settingsDirty() { return !!(settingsDraft && D && JSON.stringify(settingsDraft) !== JSON.stringify(settingsOf(D.state))); }
   /** Resolves true when it is fine to leave the Settings form (nothing to save, saved, or discarded), false to stay. */
   function leaveSettings() {
@@ -284,7 +319,7 @@
       if (v !== 'save') return false;
       busy = true; flash = null;
       return call('saveSettings', [settingsDraft]).then(function (d) {
-        busy = false; D = d; settingsDraft = null; flash = { ok: 'Settings saved.' }; refreshClasses(); return true;
+        busy = false; setD(d); settingsDraft = null; flash = { ok: 'Settings saved.' }; refreshClasses(); return true;
       }).catch(function (e) { fail(e); return false; });
     });
   }
@@ -300,9 +335,105 @@
     }).catch(fail);
   }
 
+  // ---------------------------------------------------------------- QR code and session code
+
+  /** Calls fn once the QR library is loaded (from cdnjs on first use). */
+  function withQr(fn) {
+    if (window.qrcode) { fn(); return; }
+    var sc = el('script', { src: 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
+      on: { load: fn, error: function () { flash = { err: 'The QR code library could not be loaded. Check the internet connection.' }; render(); } } });
+    document.head.appendChild(sc);
+  }
+  function qrPicture() {
+    var qr = window.qrcode(0, 'M');
+    qr.addData(studentLink()); qr.make();
+    var pic = el('div', { class: 'qr' }); pic.innerHTML = qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
+    return pic;
+  }
+
+  /**
+   * The session code line, shown wherever the QR code is: "Session code 1224" and a bar that empties over the
+   * code's 30 seconds and refills when the next code appears. Updates itself ten times a second until removed.
+   * Empty when the class does not require the code (Settings).
+   */
+  function codeLine(cls) {
+    var e = el('p', { class: cls });
+    if (!D || !D.state.code) return e;
+    var num = document.createTextNode(''), bar = el('div'), slot = -1, shown = false;
+    e.appendChild(el('small', { text: 'Session code' })); e.appendChild(num); e.appendChild(el('span', { class: 'codebar', title: 'The code changes every 30 seconds.' }, bar));
+    var tick = function () {
+      // The element is created before it is put on the page; stop ticking once it has been on the page and is removed.
+      if (document.contains(e)) shown = true;
+      else if (shown) { clearInterval(iv); return; }
+      var ms = serverNow(), k = Math.floor(ms / CODE_MS);
+      if (k !== slot) { slot = k; num.textContent = sessionCode(D.secret, k); }
+      bar.style.width = (100 * (1 - (ms - k * CODE_MS) / CODE_MS)) + '%';
+    };
+    var iv = setInterval(tick, 100);
+    tick();
+    return e;
+  }
+
+  /** "Start of semester survey is open until Oct 20, 5:00 PM · 12 of 40 submitted", or that no survey is open. */
+  function statusText() {
+    var S = D.state, onRoster = {};
+    S.roster.forEach(function (r) { onRoster[r.email] = true; });
+    var open = S.rounds.filter(function (r) { return D.open.indexOf(r.id) !== -1; });
+    if (!open.length) return 'No survey is open. Open one on the Overview tab.';
+    return open.map(function (r) {
+      var sub = responsesOf(r.id).filter(function (x) { return x.submitted && onRoster[x.email]; }).length;
+      return r.name + ' survey is open' + (r.closes ? ' until ' + isoClock(r.closes) : '') + ' · ' + sub + ' of ' + S.roster.length + ' submitted';
+    }).join(' · ');
+  }
+
+  /**
+   * Opens the QR screen of the current class in a new tab (survey_admin.html?qr=KEY), to be dragged to the
+   * projector, while this tab keeps the controls. Every such tab shows the same QR code and session code (the code
+   * is computed from the class secret and the server clock). The sign-in is copied to the new tab by the browser.
+   */
+  function showQr() {
+    window.open(location.pathname + '?qr=' + encodeURIComponent(cur), '_blank');
+  }
+
+  /** The QR tab's page: the QR code of the student link, the session code, and the live status. Drawn once; the status ticks. */
+  function qrPage() {
+    var app = document.getElementById('app');
+    if (document.querySelector('.qrveil')) return;  // drawn; the ticks read D as the poll refreshes it
+    app.innerHTML = '';
+    if (flash && flash.err) app.appendChild(el('div', { class: 'banner err', text: flash.err }));
+    if (!D) { app.appendChild(el('p', { class: 'muted', text: 'Loading...' })); return; }
+    document.title = D.state.title + ': QR code';
+    withQr(function () {
+      var status = el('p', { class: 'qrstatus' });
+      var tick = function () { if (D) status.textContent = statusText(); };
+      tick();
+      setInterval(tick, 1000);
+      document.body.appendChild(el('div', { class: 'veil qrveil', style: 'cursor:default' },
+        el('h1', { text: D.state.title }), qrPicture(), el('p', { class: 'qrurl', text: studentLink() }), codeLine('qrcode'), status,
+        el('p', { class: 'muted', text: 'Press F11 for full screen. Close this tab to leave.' })));
+    });
+  }
+
+  // ---- QR code tab: the code on the page, with the live status and a full-screen button
+  function qrTab(card) {
+    card.appendChild(el('div', { class: 'banner ' + (D.open.length ? 'ok' : 'note'), style: 'margin-top:0', text: statusText() }));
+    card.appendChild(el('div', { class: 'row', style: 'margin-top:12px' }, button('Open in a new tab', '', showQr),
+      el('span', { class: 'muted', text: 'Opens a tab with the QR code, the link, the session code, and the live status: drag it to the projector screen (F11 for full screen) and keep this tab on your monitor. Every tab opened this way shows the same QR code and session code.'
+        + (D.state.code ? ' The session code changes every 30 seconds (the bar shows the time left). A student types it once to start a survey; a wrong or stale code can be retried.' : ' Students do not need the session code in this class (Settings).') })));
+    var holder = el('div', { style: 'text-align:center; margin-top:8px' });
+    card.appendChild(holder);
+    withQr(function () {
+      var pic = qrPicture(); pic.style.cssText = 'width:min(50vh, 90%); height:auto; margin:0 auto';
+      holder.appendChild(pic);
+      holder.appendChild(el('p', { class: 'qrurl', style: 'font-size:18px', text: studentLink() }));
+      holder.appendChild(codeLine('qrcode'));
+    });
+  }
+
   // ---------------------------------------------------------------- rendering
 
   function render() {
+    if (qrMode) { qrPage(); return; }  // the page opened by "Open in a new tab" on the QR code tab
     var app = document.getElementById('app');
     var keepScroll = window.scrollY;
     app.innerHTML = '';
@@ -338,7 +469,7 @@
       cur ? el('p', { class: 'muted', style: 'margin:0' }, 'Student link: ', el('code', { text: studentLink() }), ' ',
         el('button', { class: 'link', text: 'Copy', on: { click: function () {
           (navigator.clipboard ? navigator.clipboard.writeText(studentLink()) : Promise.reject()).then(function () { flash = { ok: 'Link copied.' }; render(); }, function () {});
-        } } })) : null));
+        } } }), ' · ', el('button', { class: 'link', text: 'Open the QR code in a new tab', on: { click: showQr } })) : null));
     if (flash) app.appendChild(el('div', { class: 'banner ' + (flash.err ? 'err' : 'ok'), text: flash.err || flash.ok }));
     if (!cur) { app.appendChild(el('p', { class: 'muted', style: 'margin-top:12px', text: 'No class exists yet. Create one above.' })); return; }
     if (!D) { app.appendChild(el('p', { class: 'muted', text: 'Loading...' })); return; }
@@ -352,7 +483,7 @@
     });
     app.appendChild(tabs);
     var card = el('div', { class: 'card' });
-    ({ Overview: overview, Responses: responses, Results: results, Settings: settings, Roster: roster, Log: logTab })[tab](card);
+    ({ Overview: overview, 'QR code': qrTab, Responses: responses, Results: results, Settings: settings, Roster: roster, Log: logTab })[tab](card);
     app.appendChild(card);
     window.scrollTo(0, keepScroll);
   }
@@ -536,13 +667,17 @@
       var cb = el('input', { type: 'checkbox' }); cb.checked = v.off.indexOf(c.code) === -1;
       return { c: c, cb: cb };
     });
-    var form = function () { return { title: title.value, off: boxes.filter(function (b) { return !b.cb.checked; }).map(function (b) { return b.c.code; }) }; };
+    var codeCb = el('input', { type: 'checkbox' }); codeCb.checked = !!v.code;
+    var form = function () { return { title: title.value, off: boxes.filter(function (b) { return !b.cb.checked; }).map(function (b) { return b.c.code; }), code: codeCb.checked }; };
     var edited = function () { settingsDraft = form(); note.textContent = settingsDirty() ? 'Unsaved changes.' : ''; };
     title.addEventListener('input', edited);
+    codeCb.addEventListener('change', edited);
     boxes.forEach(function (b) { b.cb.addEventListener('change', edited); });
 
     card.appendChild(el('h2', { text: 'Class' }));
     card.appendChild(el('div', { class: 'row' }, el('label', {}, 'Title ', title)));
+    card.appendChild(el('label', { class: 'comp' }, codeCb, el('span', {}, el('b', { text: 'Students type the session code to start a survey' }), el('br'),
+      el('span', { class: 'muted', text: 'The 4-digit code is shown with the QR code (QR code tab) and changes every 30 seconds, so a student starts the survey in the room. It is typed once per survey; after that the student can finish and change answers anywhere while the survey is open. A code is accepted for 30 to 60 seconds after it appears.' }))));
     card.appendChild(el('h2', { text: 'Competencies in the survey', style: 'margin-top:16px' }));
     card.appendChild(el('p', { class: 'muted', text: 'Unchecked competencies are left out of the survey for both rounds. Equity & Inclusion is off by default. Turning a competency off keeps the answers students gave to it; turning it on adds its items, which students who have submitted then answer by submitting again.' }));
     if (anyOpen) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'A survey is open: a change applies to students the next time their page loads. Change the competencies before opening a survey where possible.' }));
@@ -554,7 +689,7 @@
       edited();
       busy = true; flash = null;
       call('saveSettings', [settingsDraft]).then(function (d) {
-        busy = false; D = d; settingsDraft = null; flash = { ok: 'Settings saved.' }; render(); refreshClasses();
+        busy = false; setD(d); settingsDraft = null; flash = { ok: 'Settings saved.' }; render(); refreshClasses();
       }).catch(fail);
     }), button('Discard', 'plain', function () { settingsDraft = null; render(); }), note));
     edited();
@@ -622,7 +757,7 @@
         download('survey_log_' + cur + '_' + today() + '.csv', [['Time (New York)', 'Time (ISO)', 'Account', 'Action', 'Detail']]
           .concat(logRows.map(function (r) { return [isoFull(r.time), r.time, r.actor, r.action, r.detail]; })));
       }) : null));
-    card.appendChild(el('p', { class: 'muted', text: 'Newest first, up to 2000 rows. Students: the first answer to a survey ("start"), each submission, and each refused attempt with its reason. Instructors: every change (open, close, settings, roster, deleted answers) and refused actions, marked by "(instructor)" after the account.' }));
+    card.appendChild(el('p', { class: 'muted', text: 'Newest first, up to 2000 rows. Students: the start of a survey ("start": the session code typed, or the first answer when the code is not required), each submission, and each refused attempt with its reason. Instructors: every change (open, close, settings, roster, deleted answers) and refused actions, marked by "(instructor)" after the account.' }));
     if (logRows === null) { card.appendChild(el('p', { class: 'muted', text: 'Loading...' })); return; }
     if (!logRows.length) { card.appendChild(el('p', { class: 'muted', text: 'No entries.' })); return; }
     var t = el('table', {}, el('tr', {}, el('th', { text: 'Time' }), el('th', { text: 'Account' }), el('th', { text: 'Action' }), el('th', { text: 'Detail' })));
