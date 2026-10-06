@@ -9,8 +9,8 @@
 
 export const LEVELS = ['Emerging Knowledge', 'Understanding', 'Early Application', 'Advanced Application'];
 
-/** N/A, as the PDF explains it. */
-export const NA_TEXT = 'You have not yet learned or applied this dimension, or you do not have enough information to self-assess.';
+/** N/A, in the PDF's words ("Use the N/A column when you have not yet learned ..."). */
+export const NA_TEXT = 'You have not yet learned or applied this dimension and/or you do not have enough information to self-assess.';
 
 export const COMPETENCIES = [
   {
