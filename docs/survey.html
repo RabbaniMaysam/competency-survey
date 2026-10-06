@@ -45,10 +45,18 @@
     .item.missing .opt { border-color: #f3c1bc; }
     .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -2px 10px rgba(0, 0, 0, .08); }
     .bar div.in { max-width: 760px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-    .bar .count { font-weight: 600; }
     .bar .state { color: var(--muted); font-size: 14px; flex: 1; }
-    .meter { height: 6px; background: #e3e7ec; }
-    .meter div { height: 100%; background: var(--accent); }
+    /* competency cards alternate light yellow and light green; the answer buttons stay white (blue when chosen) */
+    .card.compA { background: #fffbe8; border-color: #efe3b0; }
+    .card.compB { background: #eff9f0; border-color: #c6e5cc; }
+    /* one circle per item: blue when answered, red when missing after Submit; a click scrolls to the item */
+    .dots { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+    .dot { position: relative; width: 11px; height: 11px; padding: 0; border-radius: 50%; border: 1.5px solid #9aa7b4; background: #fff; cursor: pointer; }
+    .dot::after { content: ''; position: absolute; inset: -3px; }
+    .dot.first { margin-left: 4px; }
+    .dot.first:first-child { margin-left: 0; }
+    .dot.on { background: var(--accent); border-color: var(--accent); }
+    .dot.miss { background: var(--warn); border-color: var(--warn); }
     button.go { font: inherit; font-weight: 700; padding: 10px 20px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
     button.go:disabled { opacity: .5; cursor: default; }
     button.link { border: 0; background: none; color: var(--accent); padding: 0; text-decoration: underline; font: inherit; cursor: pointer; }
@@ -361,8 +369,8 @@
         + (r.closes ? ' (by ' + when(r.closes) + ').' : '.')));
     }
 
-    S.competencies.forEach(function (c) {
-      var card = el('div', { class: 'card' }, el('h2', { text: c.name }), el('p', { class: 'muted', text: c.definition }));
+    S.competencies.forEach(function (c, ci) {
+      var card = el('div', { class: 'card ' + (ci % 2 ? 'compB' : 'compA') }, el('h2', { text: c.name }), el('p', { class: 'muted', text: c.definition }));
       c.dims.forEach(function (d) {
         var id = c.code + '.' + d.code;
         var box = el('div', { class: 'item' + (showMissing && !(id in draft) ? ' missing' : ''), id: 'item-' + id }, el('h3', { text: d.name }));
@@ -430,12 +438,20 @@
       : r.submitted ? (dirty ? 'Changes not submitted yet.' : 'Submitted ' + when(r.submitted) + '.')
       : dirty ? 'Not saved yet...'
       : savedAt ? 'Saved ' + clockOf(savedAt) + '.' : '';
-    if (showMissing && n < total) state = (total - n) + (total - n === 1 ? ' item has' : ' items have') + ' no answer (marked in red).';
+    if (showMissing && n < total) state = (total - n) + ' not answered: tap a red circle to find ' + (total - n === 1 ? 'it.' : 'them.');
+    // One circle per item, competencies separated by a small gap.
+    var dots = el('div', { class: 'dots', role: 'group', 'aria-label': n + ' of ' + total + ' answered' });
+    S.competencies.forEach(function (c) {
+      c.dims.forEach(function (d, k) {
+        var id = c.code + '.' + d.code, done = id in draft;
+        dots.appendChild(el('button', { type: 'button', title: d.name + (done ? '' : ' (not answered)'), 'aria-label': d.name + (done ? ', answered' : ', not answered'),
+          class: 'dot' + (k === 0 ? ' first' : '') + (done ? ' on' : showMissing ? ' miss' : ''),
+          on: { click: function () { var e = document.getElementById('item-' + id); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } }));
+      });
+    });
     bar.hidden = false;
     bar.innerHTML = '';
-    bar.appendChild(el('div', { class: 'meter' }, el('div', { style: 'width:' + Math.round(100 * n / total) + '%' })));
-    bar.appendChild(el('div', { class: 'in' },
-      el('span', { class: 'count', text: n + ' of ' + total + ' answered' }),
+    bar.appendChild(el('div', { class: 'in' }, dots,
       el('span', { class: 'state', style: saveError || (showMissing && n < total) ? 'color:var(--warn)' : '', text: state }),
       el('button', { class: 'go', text: r.submitted ? 'Submit changes' : 'Submit', disabled: !!(saving || (r.submitted && !dirty)), on: { click: submit } })));
   }

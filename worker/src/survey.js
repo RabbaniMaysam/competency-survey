@@ -174,6 +174,13 @@ export const ADMIN = {
     r.open = false; r.closedAt = iso(now);
   },
 
+  /** Returns a closed round to "not opened yet" (the Worker deletes its answers with it). */
+  resetRound(s, id, now) {
+    const r = round(s, id);
+    if (isOpen(r, now)) throw new Error('Close the ' + r.name.toLowerCase() + ' survey first.');
+    r.open = false; r.closes = ''; r.openedAt = ''; r.closedAt = '';
+  },
+
   /** Changes or removes ('') the closing time of an open round. */
   setCloses(s, id, closes, now) {
     const r = round(s, id);

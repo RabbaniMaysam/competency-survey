@@ -517,7 +517,10 @@
           }),
           el('span', { class: 'muted', text: '·' }),
           el('label', {}, 'Closing time ', closesIn),
-          button('Set', 'plain', function () { run('setCloses', [r.id, iso()], closesIn.value ? 'Closing time set.' : 'No closing time: open until you close it.'); }),
+          button('Set', 'plain', function () {
+            ask('Change the closing time?', [closesIn.value ? 'The ' + r.name.toLowerCase() + ' survey closes by itself at ' + isoClock(iso()) + '.' : 'The ' + r.name.toLowerCase() + ' survey stays open until you close it.'], 'Set', false)
+              .then(function (yes) { if (yes) run('setCloses', [r.id, iso()], closesIn.value ? 'Closing time set.' : 'No closing time: open until you close it.'); });
+          }),
           el('span', { class: 'muted', text: 'Empty: open until you close it.' })));
       } else {
         box.appendChild(el('div', { class: 'row' },
@@ -529,6 +532,13 @@
           }),
           el('label', {}, 'closes by itself at ', closesIn),
           el('span', { class: 'muted', text: '(optional; empty: open until you close it)' })));
+        if (rows.length || r.openedAt) {
+          box.appendChild(el('div', { class: 'row', style: 'margin-top:8px' }, button('Delete all answers', 'danger', function () {
+            ask('Delete all answers to the ' + r.name.toLowerCase() + ' survey?', [rows.length + ' students\' answers are deleted and the survey returns to "not opened yet". This cannot be undone.',
+              'To keep a copy, use "Download JSON" on the Settings tab first.'], 'Delete all answers', true)
+              .then(function (yes) { if (yes) run('deleteRoundAnswers', [r.id], 'All answers to the ' + r.name.toLowerCase() + ' survey are deleted.'); });
+          }), el('span', { class: 'muted', text: 'Removes this survey\'s answers of every student. One student\'s answers are deleted on the Responses tab (Show answers).' })));
+        }
       }
       card.appendChild(box);
     });
@@ -687,10 +697,23 @@
     });
     card.appendChild(el('div', { class: 'row', style: 'margin-top:10px' }, button('Save', '', function () {
       edited();
-      busy = true; flash = null;
-      call('saveSettings', [settingsDraft]).then(function (d) {
-        busy = false; setD(d); settingsDraft = null; flash = { ok: 'Settings saved.' }; render(); refreshClasses();
-      }).catch(fail);
+      if (!settingsDirty()) { flash = { ok: 'Nothing changed.' }; render(); return; }
+      // The confirmation lists what changes.
+      var was = settingsOf(S), now = settingsDraft, lines = [];
+      var names = function (codes) { return D.competencies.filter(function (c) { return codes.indexOf(c.code) !== -1; }).map(function (c) { return c.name; }).join(', '); };
+      if (now.title.trim() !== was.title) lines.push('Title: ' + now.title.trim() + '.');
+      var turnOn = was.off.filter(function (c) { return now.off.indexOf(c) === -1; }), turnOff = now.off.filter(function (c) { return was.off.indexOf(c) === -1; });
+      if (turnOn.length) lines.push('Turned on: ' + names(turnOn) + '. Students who submitted answer the new items by submitting again.');
+      if (turnOff.length) lines.push('Turned off: ' + names(turnOff) + '. Answers already given to them are kept.');
+      if (now.code !== was.code) lines.push(now.code ? 'Students type the session code to start a survey.' : 'Students start a survey without the session code.');
+      if (anyOpen) lines.push('A survey is open: students see the change the next time their page loads.');
+      ask('Save the settings?', lines, 'Save', false).then(function (yes) {
+        if (!yes) return;
+        busy = true; flash = null;
+        call('saveSettings', [settingsDraft]).then(function (d) {
+          busy = false; setD(d); settingsDraft = null; flash = { ok: 'Settings saved.' }; render(); refreshClasses();
+        }).catch(fail);
+      });
     }), button('Discard', 'plain', function () { settingsDraft = null; render(); }), note));
     edited();
 

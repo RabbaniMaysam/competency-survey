@@ -335,6 +335,13 @@ async function adminDo(env, real, who, action, key, args) {
     const res = await env.DB.prepare('DELETE FROM responses WHERE class = ? AND round = ? AND email = ?').bind(key, r.id, email).run();
     if (!res.meta.changes) throw new Error('That student has no answers to ' + r.name.toLowerCase() + '.');
     logs.push(['delete answers', name(email) + ', ' + r.name]);
+  } else if (action === 'deleteRoundAnswers') {
+    // Every student's answers to one closed round are deleted and the round returns to "not opened yet".
+    sv.ADMIN.resetRound(s, args[0], now);
+    const r = sv.round(s, args[0]);
+    const res = await env.DB.prepare('DELETE FROM responses WHERE class = ? AND round = ?').bind(key, r.id).run();
+    await writeClass(env, key, s);
+    logs.push(['delete all answers', r.name + ': ' + res.meta.changes + ' students\' answers deleted']);
   } else if (action !== 'get') throw new Error('Unknown action.');
 
   if (logs.length) {

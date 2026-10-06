@@ -148,6 +148,7 @@ ok(/Unknown competency/.test((await adm('saveSettings', [{ off: ['nope'] }])).er
 r = await adm('setCloses', ['start', new Date(Date.now() + 3600000).toISOString()]);
 ok(r.ok && r.data.state.rounds[0].closes && r.data.open.join() === 'start', 'closing time set');
 ok(/has passed/.test((await adm('setCloses', ['start', new Date(Date.now() - 1000).toISOString()])).error), 'past closing time refused');
+ok(/Close the start of semester survey first/.test((await adm('deleteRoundAnswers', ['start'])).error), 'all answers of an open survey cannot be deleted');
 r = await adm('closeRound', ['start']);
 ok(r.ok && r.data.open.length === 0 && r.data.state.rounds[0].closedAt, 'start round closed');
 ok(/closed/.test((await stu(2, 'save', ['start', { 'career.strengths': 3 }])).error), 'saving refused after closing');
@@ -168,14 +169,17 @@ r = await adm('removeStudent', [m(1)]);
 ok(r.ok && r.data.state.roster.length === 2 && r.data.responses.some(x => x.email === m(1)), 'student removed; answers kept');
 r = await adm('addStudent', ['Al', 'Ash', 'ASH1@mail.montclair.edu']);
 ok(r.ok && r.data.state.roster.some(x => x.email === 'ash1@montclair.edu'), 'student added, address folded');
+r = await adm('deleteRoundAnswers', ['end']);
+const endRound = r.data && r.data.state.rounds.find(x => x.id === 'end');
+ok(r.ok && !r.data.responses.some(x => x.round === 'end') && r.data.responses.length === 1 && !endRound.openedAt && !endRound.closedAt, 'all answers to the closed end survey deleted; it is not opened again');
 
 // export and log
 r = await adm('export');
-ok(r.ok && r.data.state.title === 'Survey test 2' && r.data.responses.length === 2 && r.data.log.length > 5, 'export holds the state, responses, and log');
+ok(r.ok && r.data.state.title === 'Survey test 2' && r.data.responses.length === 1 && r.data.log.length > 5, 'export holds the state, responses, and log');
 ok(!JSON.stringify(r.data).includes(secret), 'export leaves out the secret');
 const lg = (await adm('log', ['', 'all', 5000])).data.rows;
 const acts = lg.map(x => x.action);
-['create class', 'import roster', 'open', 'close', 'set closing time', 'save settings', 'delete answers', 'remove student', 'add student', 'start', 'submit', 'submit changes', 'refused: save', 'refused: submit', 'refused: unlock', 'refused: closeRound']
+['create class', 'import roster', 'open', 'close', 'set closing time', 'save settings', 'delete answers', 'remove student', 'add student', 'start', 'submit', 'submit changes', 'refused: save', 'refused: submit', 'refused: unlock', 'refused: closeRound', 'delete all answers', 'refused: deleteRoundAnswers']
   .forEach(a => ok(acts.indexOf(a) !== -1, 'logged: ' + a));
 ok(acts.indexOf('export') === -1 && acts.indexOf('get') === -1 && acts.indexOf('state') === -1, 'reads are not logged');
 ok(lg.filter(x => x.action === 'start').length === 3, 'a draft start is logged once per student and round');

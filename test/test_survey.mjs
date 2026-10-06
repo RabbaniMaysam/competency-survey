@@ -97,6 +97,10 @@ throws(() => sv.ADMIN.saveSettings(s, { off: COMPETENCIES.map(c => c.code) }), /
 throws(() => sv.ADMIN.saveSettings(s, { title: ' ' }), /title/, 'empty title refused');
 sv.ADMIN.saveSettings(s, { title: 'New title' });
 ok(s.title === 'New title' && s.off.join() === 'equity,teamwork' && s.code === true, 'title alone changes only the title');
+throws(() => sv.ADMIN.resetRound(s, 'start', T0), /Close the start of semester survey first/, 'an open round cannot be reset');
+sv.ADMIN.closeRound(s, 'start', T0);
+sv.ADMIN.resetRound(s, 'start', T0 + 1);
+ok(['open', 'closes', 'openedAt', 'closedAt'].every(k => !sv.round(s, 'start')[k]), 'a closed round resets to not opened');
 sv.ADMIN.saveSettings(s, { code: false });
 ok(s.code === false && sv.studentView(s, 'bo@montclair.edu', [], T0).needCode === false, 'session code turned off');
 
