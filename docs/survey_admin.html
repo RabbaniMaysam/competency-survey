@@ -85,17 +85,6 @@
     .report tr.group td { font-weight: 700; padding-top: 12px; }
     .report tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
     .report td.lab { padding-left: 18px; }
-    /* "Save as PDF" prints the report alone */
-    @media print {
-      @page { margin: 16mm; }
-      body { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      main { max-width: none; padding: 0; }
-      body.printreport #app > :not(.report), .noprint { display: none !important; }
-      .card.report { border: 0; padding: 0; margin: 0; }
-      .scroll { overflow: visible; }
-      tr { break-inside: avoid; }
-      thead { display: table-header-group; }
-    }
   </style>
 </head>
 <body>
@@ -362,14 +351,17 @@
 
   // ---------------------------------------------------------------- QR code and session code
 
-  // Libraries loaded from a CDN on first use: the QR code, the Excel file (SheetJS), and the Word file (docx).
-  var LIBS = { qrcode: 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
-               XLSX: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
-               docx: 'https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.js' };
-  /** Calls fn once the library (a global of that name) is loaded. */
+  // Libraries loaded from a CDN on first use: the QR code, the Excel file (SheetJS), the Word file (docx), and the
+  // PDF file (jsPDF and its AutoTable plugin). `has` tells whether the library is loaded.
+  var LIBS = { qrcode: { src: 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js', has: function () { return window.qrcode; } },
+               XLSX: { src: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', has: function () { return window.XLSX; } },
+               docx: { src: 'https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.js', has: function () { return window.docx; } },
+               jspdf: { src: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', has: function () { return window.jspdf; } },
+               autotable: { src: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js', has: function () { return window.jspdf && window.jspdf.jsPDF.API.autoTable; } } };
+  /** Calls fn once the library is loaded. */
   function withLib(name, fn) {
-    if (window[name]) { fn(); return; }
-    var sc = el('script', { src: LIBS[name],
+    if (LIBS[name].has()) { fn(); return; }
+    var sc = el('script', { src: LIBS[name].src,
       on: { load: fn, error: function () { busy = false; flash = { err: 'The ' + name + ' library could not be loaded. Check the internet connection.' }; render(); } } });
     document.head.appendChild(sc);
   }
@@ -515,7 +507,6 @@
     var card = el('div', { class: 'card' });
     ({ Overview: overview, 'QR code': qrTab, Responses: responses, Report: reportTab, Settings: settings, Roster: roster, Log: logTab })[tab](card);
     app.appendChild(card);
-    document.body.classList.toggle('printreport', tab === 'Report');
     window.scrollTo(0, keepScroll);
   }
 
@@ -657,7 +648,7 @@
 
   // The Report tab shows the statistics the Worker computes (worker/src/report.js) for one survey round or for the
   // change between the two. The report is built once as a list of blocks (title, summary figures, headings, text,
-  // figures, tables), which the page draws, "Save as PDF" prints, and the Word and Excel downloads convert.
+  // figures, tables), which the page draws and the PDF, Word, and Excel downloads convert.
   var reportData = null, reportKey = '', reportLoading = false, reportView = 'start', reportNames = true, reportModelNow = null;
 
   function loadReport(quiet) {
@@ -682,20 +673,20 @@
     }
     var R = reportData;
     var views = [{ id: 'start', label: R.rounds[0].name }, { id: 'end', label: R.rounds[1].name }, { id: 'both', label: 'Start vs end' }];
-    var bar = el('div', { class: 'row noprint' });
+    var bar = el('div', { class: 'row' });
     views.forEach(function (v) {
       bar.appendChild(el('button', { class: 'tab' + (v.id === reportView ? ' on' : ''), text: v.label, disabled: busy, on: { click: function () { reportView = v.id; render(); } } }));
     });
     bar.appendChild(el('span', { class: 'muted', text: '·' }));
-    bar.appendChild(button('Save as PDF', 'plain', function () { window.print(); }));
+    bar.appendChild(button('Download PDF', 'plain', reportPdf));
     bar.appendChild(button('Download Word', 'plain', reportWord));
     bar.appendChild(button('Download Excel', 'plain', reportExcel));
     var namesCb = el('input', { type: 'checkbox' }); namesCb.checked = reportNames;
     namesCb.addEventListener('change', function () { reportNames = namesCb.checked; render(); });
     bar.appendChild(el('label', {}, namesCb, 'students by name'));
     card.appendChild(bar);
-    card.appendChild(el('p', { class: 'muted noprint', text: 'The report of one survey counts every submitted survey of students on the roster; "Start vs end" compares the students who submitted both. '
-      + '"Save as PDF" prints this report (choose "Save as PDF" as the printer). Word has the same text, figures, and tables; Excel has the tables, plus every student\'s competency scores. '
+    card.appendChild(el('p', { class: 'muted', text: 'The report of one survey counts every submitted survey of students on the roster; "Start vs end" compares the students who submitted both. '
+      + 'The PDF and Word files have this report\'s text, figures, and tables; Excel has the tables, plus every student\'s competency scores. '
       + 'The students table (names and scores) is left out of all three when "students by name" is unchecked.' }));
     reportModelNow = reportModel(R, reportView, reportNames);
     card.appendChild(renderModel(reportModelNow));
@@ -724,46 +715,42 @@
   }
   function dateOf(iso) { return iso ? new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(iso)) : ''; }
 
-  // ---- figures: SVG drawn here (no library), 720 px wide, so they print and convert to PNG for Word
-  var NS = 'http://www.w3.org/2000/svg';
-  function sv(tag, attrs) {
-    var e = document.createElementNS(NS, tag);
-    Object.keys(attrs || {}).forEach(function (k) { if (k === 'text') e.textContent = attrs[k]; else e.setAttribute(k, attrs[k]); });
-    for (var i = 2; i < arguments.length; i++) if (arguments[i]) e.appendChild(arguments[i]);
-    return e;
-  }
-  var CH = { w: 720, label: 250, right: 64, row: 22, group: 28, font: 12 };
+  // ---- figures: each chart is a list of shapes (rect, circle, line, text) in a 720 px wide frame. The page shows it
+  // as SVG (chartSvg); the PDF and Word files get it drawn on a canvas at three times the size (chartPng).
+  var CH = { w: 720, label: 250, right: 64, row: 22, group: 28, font: 12 }, FONT = 'Arial, Helvetica, sans-serif';
   var LEVEL_COLORS = ['#d3e2f4', '#93b9e5', '#4d88d0', '#0b5cad'], NA_COLOR = '#c9ced4', START_COLOR = '#9fbfe6', END_COLOR = '#0b5cad';
-  var UP_COLOR = '#2e9e4f', SAME_COLOR = '#d5d9de', DOWN_COLOR = '#c9372c';
+  var UP_COLOR = '#2e9e4f', SAME_COLOR = '#d5d9de', DOWN_COLOR = '#c9372c', INK = '#1f2328', MUTED = '#5c6670';
   function darkFill(hex) { var n = parseInt(hex.slice(1), 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) < 150; }
+  var rect = function (x, y, w, h, fill, rx) { return { k: 'rect', x: x, y: y, w: w, h: h, fill: fill, rx: rx || 0 }; };
+  var circle = function (cx, cy, r, fill, stroke) { return { k: 'circle', cx: cx, cy: cy, r: r, fill: fill, stroke: stroke || '' }; };
+  var line = function (x1, y1, x2, y2, stroke, sw) { return { k: 'line', x1: x1, y1: y1, x2: x2, y2: y2, stroke: stroke, sw: sw || 1 }; };
+  /** Text at (x, y) (y = baseline); o: {size, bold, fill, middle} */
+  var text = function (x, y, s, o) { o = o || {}; return { k: 'text', x: x, y: y, s: String(s), size: o.size || CH.font, bold: !!o.bold, fill: o.fill || INK, middle: !!o.middle }; };
 
-  /** The frame of a horizontal chart: white background, legend, one row per entry (group rows as bold headings), row labels. */
+  /** The frame of a horizontal chart: legend, one row per entry (group rows as bold headings), row labels. */
   function chartFrame(rows, legend) {
-    var top = 10 + (legend ? 24 : 0), y = top, ys = [];
+    var top = 10 + (legend ? 24 : 0), y = top, ys = [], ops = [];
     rows.forEach(function (r) { if (r.group) { y += 6; ys.push(y + CH.group - 8); y += CH.group; } else { ys.push(y + CH.row / 2); y += CH.row; } });
-    var h = y + 26;
-    var svg = sv('svg', { xmlns: NS, width: CH.w, height: h, viewBox: '0 0 ' + CH.w + ' ' + h, 'font-family': 'Arial, Helvetica, sans-serif', 'font-size': CH.font, fill: '#1f2328' });
-    svg.appendChild(sv('rect', { x: 0, y: 0, width: CH.w, height: h, fill: '#fff' }));
     var lx = 0;
     (legend || []).forEach(function (g) {
-      svg.appendChild(g.dot ? sv('circle', { cx: lx + 6, cy: 12, r: 5.5, fill: g.color }) : sv('rect', { x: lx, y: 6, width: 12, height: 12, fill: g.color }));
-      svg.appendChild(sv('text', { x: lx + 17, y: 16, text: g.label }));
+      ops.push(g.dot ? circle(lx + 6, 12, 5.5, g.color) : rect(lx, 6, 12, 12, g.color));
+      ops.push(text(lx + 17, 16, g.label));
       lx += 17 + g.label.length * 6.4 + 16;
     });
     var grouped = rows.some(function (r) { return r.group; });
     rows.forEach(function (r, k) {
       var label = r.group || r.label;
       if (label.length > 42) label = label.slice(0, 41) + '…';
-      svg.appendChild(sv('text', { x: r.group || !grouped ? 0 : 14, y: ys[k] + 4, text: label, 'font-weight': r.group || r.bold ? 'bold' : 'normal' }));
+      ops.push(text(r.group || !grouped ? 0 : 14, ys[k] + 4, label, { bold: !!(r.group || r.bold) }));
     });
-    return { svg: svg, ys: ys, top: top, axisY: y, x0: CH.label, x1: CH.w - CH.right };
+    return { w: CH.w, h: y + 26, ops: ops, ys: ys, top: top, axisY: y, x0: CH.label, x1: CH.w - CH.right };
   }
   /** Grid lines and tick labels; returns the x of a value. ticks: [{v, label}] over [lo, hi]. */
   function axis(f, lo, hi, ticks) {
     var x = function (v) { return f.x0 + (v - lo) / (hi - lo) * (f.x1 - f.x0); };
     ticks.forEach(function (t) {
-      f.svg.appendChild(sv('line', { x1: x(t.v), x2: x(t.v), y1: f.top, y2: f.axisY, stroke: '#e3e7ec' }));
-      f.svg.appendChild(sv('text', { x: x(t.v), y: f.axisY + 16, text: t.label, 'text-anchor': 'middle', fill: '#5c6670', 'font-size': 11 }));
+      f.ops.push(line(x(t.v), f.top, x(t.v), f.axisY, '#e3e7ec'));
+      f.ops.push(text(x(t.v), f.axisY + 16, t.label, { middle: true, fill: MUTED, size: 11 }));
     });
     return x;
   }
@@ -775,10 +762,10 @@
     var f = chartFrame(rows, null), x = axis(f, 1, 4, LEVEL_TICKS);
     rows.forEach(function (r, k) {
       if (r.group || r.value === null || r.value === undefined) return;
-      f.svg.appendChild(sv('rect', { x: x(1), y: f.ys[k] - 8, width: Math.max(0, x(r.value) - x(1)), height: 16, fill: color, rx: 2 }));
-      f.svg.appendChild(sv('text', { x: x(r.value) + 6, y: f.ys[k] + 4, text: r.value.toFixed(2) }));
+      f.ops.push(rect(x(1), f.ys[k] - 8, Math.max(0, x(r.value) - x(1)), 16, color, 2));
+      f.ops.push(text(x(r.value) + 6, f.ys[k] + 4, r.value.toFixed(2)));
     });
-    return f.svg;
+    return f;
   }
   /** Start and end means as two dots joined by a line, with the change at the right. rows: [{label, a, b, group, bold}]. */
   function dumbbellChart(rows, names) {
@@ -786,12 +773,12 @@
     rows.forEach(function (r, k) {
       if (r.group || r.a === null || r.a === undefined || r.b === null || r.b === undefined) return;
       var y = f.ys[k], d = r.b - r.a;
-      f.svg.appendChild(sv('line', { x1: x(r.a), x2: x(r.b), y1: y, y2: y, stroke: '#8a94a0', 'stroke-width': 3 }));
-      f.svg.appendChild(sv('circle', { cx: x(r.a), cy: y, r: 5.5, fill: START_COLOR, stroke: '#fff', 'stroke-width': 1 }));
-      f.svg.appendChild(sv('circle', { cx: x(r.b), cy: y, r: 5.5, fill: END_COLOR }));
-      f.svg.appendChild(sv('text', { x: f.x1 + 10, y: y + 4, text: signed(d), 'font-weight': 'bold', fill: d > 0.005 ? UP_COLOR : d < -0.005 ? DOWN_COLOR : '#5c6670' }));
+      f.ops.push(line(x(r.a), y, x(r.b), y, '#8a94a0', 3));
+      f.ops.push(circle(x(r.a), y, 5.5, START_COLOR, '#fff'));
+      f.ops.push(circle(x(r.b), y, 5.5, END_COLOR));
+      f.ops.push(text(f.x1 + 10, y + 4, signed(d), { bold: true, fill: d > 0.005 ? UP_COLOR : d < -0.005 ? DOWN_COLOR : MUTED }));
     });
-    return f.svg;
+    return f;
   }
   /** 100% stacked bars. rows: [{label, parts: [counts], group}]; one color and legend label per part. */
   function stackChart(rows, colors, labels) {
@@ -803,13 +790,46 @@
       r.parts.forEach(function (p, i) {
         if (!p) return;
         var left = x(acc / total), w = (f.x1 - f.x0) * p / total;
-        f.svg.appendChild(sv('rect', { x: left, y: f.ys[k] - 8, width: w, height: 16, fill: colors[i] }));
-        if (w > 28) f.svg.appendChild(sv('text', { x: left + w / 2, y: f.ys[k] + 4, text: Math.round(100 * p / total) + '%', 'text-anchor': 'middle', 'font-size': 10, fill: darkFill(colors[i]) ? '#fff' : '#1f2328' }));
+        f.ops.push(rect(left, f.ys[k] - 8, w, 16, colors[i]));
+        if (w > 28) f.ops.push(text(left + w / 2, f.ys[k] + 4, Math.round(100 * p / total) + '%', { middle: true, size: 10, fill: darkFill(colors[i]) ? '#fff' : INK }));
         acc += p;
       });
-      f.svg.appendChild(sv('text', { x: f.x1 + 10, y: f.ys[k] + 4, text: 'n = ' + total, fill: '#5c6670', 'font-size': 11 }));
+      f.ops.push(text(f.x1 + 10, f.ys[k] + 4, 'n = ' + total, { fill: MUTED, size: 11 }));
     });
-    return f.svg;
+    return f;
+  }
+  /** The chart as an SVG element for the page. */
+  function chartSvg(c) {
+    var NS = 'http://www.w3.org/2000/svg';
+    var sv = function (tag, attrs) { var e = document.createElementNS(NS, tag); Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); }); return e; };
+    var svg = sv('svg', { xmlns: NS, width: c.w, height: c.h, viewBox: '0 0 ' + c.w + ' ' + c.h, 'font-family': FONT, 'font-size': CH.font, fill: INK });
+    c.ops.forEach(function (o) {
+      var e;
+      if (o.k === 'rect') e = sv('rect', { x: o.x, y: o.y, width: o.w, height: o.h, fill: o.fill, rx: o.rx });
+      else if (o.k === 'circle') e = sv('circle', { cx: o.cx, cy: o.cy, r: o.r, fill: o.fill, stroke: o.stroke || 'none' });
+      else if (o.k === 'line') e = sv('line', { x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2, stroke: o.stroke, 'stroke-width': o.sw });
+      else { e = sv('text', { x: o.x, y: o.y, fill: o.fill, 'font-size': o.size, 'font-weight': o.bold ? 'bold' : 'normal', 'text-anchor': o.middle ? 'middle' : 'start' }); e.textContent = o.s; }
+      svg.appendChild(e);
+    });
+    return svg;
+  }
+  /** The chart drawn on a canvas at `scale` times its size, as a PNG: {data (bytes), dataUrl, w, h} (w and h in CSS px). */
+  function chartPng(c, scale) {
+    var cv = document.createElement('canvas'); cv.width = c.w * scale; cv.height = c.h * scale;
+    var g = cv.getContext('2d');
+    g.scale(scale, scale); g.fillStyle = '#fff'; g.fillRect(0, 0, c.w, c.h);
+    c.ops.forEach(function (o) {
+      if (o.k === 'rect') { g.fillStyle = o.fill; g.beginPath(); if (o.rx && g.roundRect) g.roundRect(o.x, o.y, o.w, o.h, o.rx); else g.rect(o.x, o.y, o.w, o.h); g.fill(); }
+      else if (o.k === 'circle') { g.beginPath(); g.arc(o.cx, o.cy, o.r, 0, 2 * Math.PI); g.fillStyle = o.fill; g.fill(); if (o.stroke) { g.strokeStyle = o.stroke; g.lineWidth = 1; g.stroke(); } }
+      else if (o.k === 'line') { g.beginPath(); g.moveTo(o.x1, o.y1); g.lineTo(o.x2, o.y2); g.strokeStyle = o.stroke; g.lineWidth = o.sw; g.stroke(); }
+      else { g.font = (o.bold ? 'bold ' : '') + o.size + 'px ' + FONT; g.fillStyle = o.fill; g.textAlign = o.middle ? 'center' : 'left'; g.textBaseline = 'alphabetic'; g.fillText(o.s, o.x, o.y); }
+    });
+    return new Promise(function (resolve, reject) {
+      cv.toBlob(function (blob) {
+        if (!blob) { reject(new Error('A figure could not be drawn.')); return; }
+        blob.arrayBuffer().then(function (buf) { resolve({ data: new Uint8Array(buf), dataUrl: cv.toDataURL('image/png'), w: c.w, h: c.h }); });
+      }, 'image/png');
+    });
   }
   /** Chart rows of the items, with a group row before each competency. */
   function itemRows(items, f) {
@@ -848,13 +868,13 @@
       { v: pct(o.applying), l: 'answers at level 3 or 4' },
       { v: pct(o.na / answers), l: 'N/A answers' }] }];
     blocks.push({ t: 'h2', text: 'Competencies' });
-    blocks.push({ t: 'figure', svg: barChart([{ label: 'All competencies', value: o.mean, bold: true }].concat(comps.map(function (c) { return { label: c.name, value: c[id].mean }; })), END_COLOR),
+    blocks.push({ t: 'figure', chart:barChart([{ label: 'All competencies', value: o.mean, bold: true }].concat(comps.map(function (c) { return { label: c.name, value: c[id].mean }; })), END_COLOR),
       caption: 'Mean level by competency, from 1 (' + R.levels[0] + ') to 4 (' + R.levels[3] + '), over the ' + r.submitted + ' students who submitted.' });
     blocks.push({ t: 'table', sheet: 'Competencies', head: ['Competency', 'Mean', 'SD', 'Students', 'At level 3 or 4', 'N/A answers'], num: [1, 2, 3, 4, 5], group: -1, total: true,
       rows: comps.map(function (c) { return [c.name, c[id].mean, c[id].sd, int(c[id].n), pc(c[id].applying), int(c[id].na)]; })
         .concat([['All competencies', o.mean, o.sd, int(o.n), pc(o.applying), int(o.na)]]) });
     blocks.push({ t: 'h2', text: 'Items' });
-    blocks.push({ t: 'figure', svg: stackChart(itemRows(items, function (i) { return { label: i.name, parts: i[id].dist }; }), LEVEL_COLORS.concat([NA_COLOR]), levelNames.concat(['N/A'])),
+    blocks.push({ t: 'figure', chart:stackChart(itemRows(items, function (i) { return { label: i.name, parts: i[id].dist }; }), LEVEL_COLORS.concat([NA_COLOR]), levelNames.concat(['N/A'])),
       caption: 'Share of the answers at each level, by item (n = answers, N/A included).' });
     blocks.push({ t: 'table', sheet: 'Items', head: ['Competency', 'Item', 'Mean', 'SD', 'Answers at a level', 'Level 1', 'Level 2', 'Level 3', 'Level 4', 'N/A'], num: [2, 3, 4, 5, 6, 7, 8, 9], group: 0,
       rows: items.map(function (i) { return [i.compName, i.name, i[id].mean, i[id].sd, int(i[id].n)].concat(i[id].dist.map(int)); }) });
@@ -877,14 +897,14 @@
       { v: signed(o.mean), l: 'mean change' + (o.p !== null ? ' (p ' + (o.p < 0.001 ? '< 0.001' : '= ' + pText(o.p)) + ')' : '') },
       { v: pct(o.up / o.n), l: 'students whose mean level rose' }] }];
     blocks.push({ t: 'h2', text: 'Competencies' });
-    blocks.push({ t: 'figure', svg: dumbbellChart([{ label: 'All competencies', a: o.before, b: o.after, bold: true }].concat(comps.map(function (c) { return { label: c.name, a: c.change.before, b: c.change.after }; })), [a.name, b.name]),
+    blocks.push({ t: 'figure', chart:dumbbellChart([{ label: 'All competencies', a: o.before, b: o.after, bold: true }].concat(comps.map(function (c) { return { label: c.name, a: c.change.before, b: c.change.after }; })), [a.name, b.name]),
       caption: 'Mean level at the start and at the end of the semester, by competency, for the ' + P.both + ' students who submitted both surveys, and the mean change.' });
     blocks.push({ t: 'table', sheet: 'Competencies', head: ['Competency', a.name, b.name, 'Change', 'SD of change', 'Students', 'p', 'Rose', 'Same', 'Fell'], num: [1, 2, 3, 4, 5, 6, 7, 8, 9], group: -1, total: true,
       rows: comps.map(function (c) { return changeRow(c.name, c.change); }).concat([changeRow('All competencies', o)]) });
-    blocks.push({ t: 'figure', svg: stackChart([{ label: 'All competencies', parts: [o.up, o.same, o.down], bold: true }].concat(comps.map(function (c) { return { label: c.name, parts: [c.change.up, c.change.same, c.change.down] }; })), [UP_COLOR, SAME_COLOR, DOWN_COLOR], ['Rose', 'Same', 'Fell']),
+    blocks.push({ t: 'figure', chart:stackChart([{ label: 'All competencies', parts: [o.up, o.same, o.down], bold: true }].concat(comps.map(function (c) { return { label: c.name, parts: [c.change.up, c.change.same, c.change.down] }; })), [UP_COLOR, SAME_COLOR, DOWN_COLOR], ['Rose', 'Same', 'Fell']),
       caption: 'Share of students whose competency score rose, stayed the same, or fell between the two surveys.' });
     blocks.push({ t: 'h2', text: 'Items' });
-    blocks.push({ t: 'figure', svg: dumbbellChart(itemRows(items, function (i) { return { label: i.name, a: i.change.before, b: i.change.after }; }), [a.name, b.name]),
+    blocks.push({ t: 'figure', chart:dumbbellChart(itemRows(items, function (i) { return { label: i.name, a: i.change.before, b: i.change.after }; }), [a.name, b.name]),
       caption: 'Mean level at the start and at the end of the semester, by item, for the students who answered the item at a level in both surveys.' });
     blocks.push({ t: 'table', sheet: 'Items', head: ['Competency', 'Item', a.name, b.name, 'Change', 'SD of change', 'Students', 'p', 'Rose', 'Same', 'Fell'], num: [2, 3, 4, 5, 6, 7, 8, 9, 10], group: 0,
       rows: items.map(function (i) { return [i.compName].concat(changeRow(i.name, i.change)); }) });
@@ -919,7 +939,7 @@
       else if (b.t === 'facts') { var g = el('div', { class: 'facts' }); b.items.forEach(function (i) { g.appendChild(el('div', { class: 'fact' }, el('b', { text: i.v }), el('span', { text: i.l }))); }); box.appendChild(g); }
       else if (b.t === 'h2') box.appendChild(el('h2', { class: 'sec', text: b.text }));
       else if (b.t === 'p') box.appendChild(el('p', { class: b.muted ? 'muted' : '', text: b.text }));
-      else if (b.t === 'figure') box.appendChild(el('div', { class: 'figure' }, b.svg, el('p', { text: b.caption })));
+      else if (b.t === 'figure') box.appendChild(el('div', { class: 'figure' }, chartSvg(b.chart), el('p', { text: b.caption })));
       else if (b.t === 'table') box.appendChild(el('div', { class: 'scroll' }, domTable(b)));
     });
     return box;
@@ -967,18 +987,89 @@
     });
   }
 
-  /** A figure as PNG bytes (the SVG drawn on a canvas at twice its size). */
-  function svgToPng(svg) {
-    return new Promise(function (resolve, reject) {
-      var w = Number(svg.getAttribute('width')), h = Number(svg.getAttribute('height')), img = new Image();
-      img.onload = function () {
-        var c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2;
-        var ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
-        c.toBlob(function (blob) { blob.arrayBuffer().then(function (buf) { resolve({ data: new Uint8Array(buf), w: w, h: h }); }); }, 'image/png');
-      };
-      img.onerror = function () { reject(new Error('A figure could not be drawn.')); };
-      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+  /** The figures of the model as PNGs at three times their size, in order. */
+  function figurePngs(m) {
+    return Promise.all(m.blocks.filter(function (b) { return b.t === 'figure'; }).map(function (b) { return chartPng(b.chart, 3); }));
+  }
+  /** The text of the PDF: Helvetica has no arrow. */
+  function pdfText(s) { return s.replace(/ → /g, ' to '); }
+
+  /** The PDF file (jsPDF): Letter pages with 0.75 in margins, the figures as pictures, the tables with AutoTable, page numbers. */
+  function reportPdf() {
+    var m = reportModelNow;
+    if (!m) return;
+    busy = true; flash = null; render();
+    withLib('jspdf', function () { withLib('autotable', function () {
+      figurePngs(m).then(function (pngs) {
+        var doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'letter' });
+        var M = 54, W = 612 - 2 * M, BOTTOM = 792 - M, y = M, fi = 0;
+        var ink = [31, 35, 40], muted = [92, 102, 112], lineColor = [215, 221, 227];
+        var ensure = function (need) { if (y + need > BOTTOM) { doc.addPage(); y = M; } };
+        /** Wrapped text at the current y; o: {style, color, after} */
+        var put = function (s, size, o) {
+          o = o || {};
+          doc.setFont('helvetica', o.style || 'normal'); doc.setFontSize(size); doc.setTextColor.apply(doc, o.color || ink);
+          var lines = doc.splitTextToSize(pdfText(s), W), lh = size * 1.3;
+          ensure(lines.length * lh);
+          doc.text(lines, M, y + size);
+          y += lines.length * lh + (o.after || 0);
+        };
+        var figHeight = function (b) { var k = m.blocks.filter(function (x) { return x.t === 'figure'; }).indexOf(b); return W * pngs[k].h / pngs[k].w + 28; };
+        m.blocks.forEach(function (b, bi) {
+          if (b.xlsxOnly) return;
+          var next = m.blocks[bi + 1];
+          if (b.t === 'head') { put(b.title, 20, { style: 'bold', after: 2 }); put(b.sub, 13, { color: muted, after: 4 }); put(b.meta, 8.5, { color: muted, after: 10 }); }
+          else if (b.t === 'facts') {
+            var n = b.items.length, gap = 8, bw = (W - gap * (n - 1)) / n, bh = 52;
+            ensure(bh + 12);
+            b.items.forEach(function (i, k) {
+              var x = M + k * (bw + gap);
+              doc.setFillColor(248, 250, 252); doc.setDrawColor.apply(doc, lineColor); doc.roundedRect(x, y, bw, bh, 4, 4, 'FD');
+              doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor.apply(doc, ink); doc.text(pdfText(i.v), x + 8, y + 20);
+              doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor.apply(doc, muted); doc.text(doc.splitTextToSize(pdfText(i.l), bw - 16), x + 8, y + 32);
+            });
+            y += bh + 14;
+          }
+          else if (b.t === 'h2') { ensure(30 + (next && next.t === 'figure' ? figHeight(next) : 60)); y += 8; put(b.text, 13, { style: 'bold', after: 4 }); }
+          else if (b.t === 'p') put(b.text, 8.5, { color: muted, after: 6 });
+          else if (b.t === 'figure') {
+            var png = pngs[fi++], h = W * png.h / png.w;
+            ensure(h + 24);
+            doc.addImage(png.dataUrl, 'PNG', M, y, W, h, undefined, 'FAST');
+            y += h + 4;
+            put(b.caption, 8, { style: 'italic', color: muted, after: 12 });
+          }
+          else if (b.t === 'table') { pdfTable(doc, b, y, M, ink); y = doc.lastAutoTable.finalY + 14; }
+        });
+        var pages = doc.getNumberOfPages();
+        for (var p = 1; p <= pages; p++) {
+          doc.setPage(p); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor.apply(doc, muted);
+          doc.text(m.title + ': ' + m.sub, M, 792 - 30);
+          doc.text('Page ' + p + ' of ' + pages, 612 - M, 792 - 30, { align: 'right' });
+        }
+        doc.save(m.file + '.pdf');
+        busy = false; flash = { ok: 'PDF file downloaded.' }; render();
+      }).catch(fail);
+    }); });
+  }
+  function pdfTable(doc, b, y, M, ink) {
+    var keep = b.head.map(function (h, k) { return k; }).filter(function (k) { return k !== b.group; });
+    var align = function (k) { return isNum(b, k) ? 'right' : 'left'; };
+    var body = [], last = null;
+    b.rows.forEach(function (r, ri) {
+      if (b.group >= 0 && r[b.group] !== last) { last = r[b.group]; body.push([{ content: last, colSpan: keep.length, styles: { fontStyle: 'bold', cellPadding: { top: 8, bottom: 2, left: 4, right: 4 } } }]); }
+      var total = b.total && ri === b.rows.length - 1;
+      body.push(keep.map(function (k) {
+        var st = { halign: align(k) };
+        if (total) { st.fontStyle = 'bold'; st.lineWidth = { top: 1 }; st.lineColor = ink; }
+        if (b.group >= 0 && k === b.group + 1) st.cellPadding = { top: 3, bottom: 3, left: 14, right: 4 };
+        return { content: cellText(r[k]), styles: st };
+      }));
     });
+    doc.autoTable({ startY: y, margin: { left: M, right: M, top: M, bottom: M }, theme: 'plain', rowPageBreak: 'avoid',
+      head: [keep.map(function (k) { return { content: b.head[k], styles: { halign: align(k) } }; })], body: body,
+      styles: { font: 'helvetica', fontSize: 8.5, cellPadding: { top: 3, bottom: 3, left: 4, right: 4 }, textColor: ink, lineColor: [227, 231, 236], lineWidth: { bottom: 0.5 } },
+      headStyles: { fillColor: [236, 238, 241], fontStyle: 'bold', lineWidth: 0 } });
   }
 
   /** The Word file: the same blocks, figures as pictures. */
@@ -988,8 +1079,7 @@
     busy = true; flash = null; render();
     withLib('docx', function () {
       var d = window.docx;
-      var figs = m.blocks.filter(function (b) { return b.t === 'figure'; });
-      Promise.all(figs.map(function (b) { return svgToPng(b.svg); })).then(function (pngs) {
+      figurePngs(m).then(function (pngs) {
         var kids = [], fi = 0;
         var para = function (text, opts) { return new d.Paragraph(Object.assign({ children: [new d.TextRun({ text: text })], spacing: { after: 120 } }, opts || {})); };
         m.blocks.forEach(function (b) {
@@ -1009,9 +1099,10 @@
             kids.push(new d.Paragraph({ children: [new d.TextRun({ text: b.caption, italics: true, size: 18 })], spacing: { after: 240 } }));
           } else if (b.t === 'table') { kids.push(docxTable(d, b)); kids.push(para('')); }
         });
+        var footer = new d.Footer({ children: [new d.Paragraph({ alignment: d.AlignmentType.RIGHT, children: [new d.TextRun({ children: ['Page ', d.PageNumber.CURRENT, ' of ', d.PageNumber.TOTAL_PAGES], size: 16, color: '5c6670' })] })] });
         var doc = new d.Document({ creator: 'Competency survey', title: m.title + ': ' + m.sub,
           styles: { default: { document: { run: { font: 'Calibri', size: 21 } } } },
-          sections: [{ properties: { page: { margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 } } }, children: kids }] });
+          sections: [{ properties: { page: { margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 } } }, footers: { default: footer }, children: kids }] });
         return d.Packer.toBlob(doc);
       }).then(function (blob) {
         saveBlob(m.file + '.docx', blob);
@@ -1021,17 +1112,27 @@
   }
   function docxTable(d, b) {
     var keep = b.head.map(function (h, k) { return k; }).filter(function (k) { return k !== b.group; });
-    var cell = function (text, o) {
-      return new d.TableCell({ columnSpan: o.span, margins: { top: 40, bottom: 40, left: 80, right: 80 },
-        children: [new d.Paragraph({ alignment: o.right ? d.AlignmentType.RIGHT : d.AlignmentType.LEFT, children: [new d.TextRun({ text: text, bold: !!o.bold, size: 17 })] })] });
-    };
-    var rows = [new d.TableRow({ tableHeader: true, children: keep.map(function (k) { return cell(b.head[k], { bold: true, right: isNum(b, k) }); }) })], last = null;
-    b.rows.forEach(function (r, ri) {
-      if (b.group >= 0 && r[b.group] !== last) { last = r[b.group]; rows.push(new d.TableRow({ children: [cell(last, { bold: true, span: keep.length })] })); }
-      var bold = b.total && ri === b.rows.length - 1;
-      rows.push(new d.TableRow({ children: keep.map(function (k) { return cell((b.group >= 0 && k === b.group + 1 ? '   ' : '') + cellText(r[k]), { bold: bold, right: isNum(b, k) }); }) }));
+    // column widths (twentieths of a point over the 7 in text width) in proportion to the longest text of each column
+    var TOTAL = 10080, lens = keep.map(function (k) {
+      var headWord = b.head[k].split(' ').reduce(function (w, s) { return Math.max(w, s.length); }, 0);
+      var longest = b.rows.reduce(function (w, r) { return Math.max(w, cellText(r[k]).length); }, headWord);
+      return Math.max(8, Math.min(30, longest + 2));
     });
-    return new d.Table({ width: { size: 100, type: d.WidthType.PERCENTAGE }, rows: rows });
+    var sumLen = lens.reduce(sum, 0), widths = lens.map(function (l) { return Math.round(TOTAL * l / sumLen); });
+    var edge = { style: d.BorderStyle.SINGLE, size: 4, color: 'd7dde3' };
+    var cell = function (s, o) {
+      return new d.TableCell({ columnSpan: o.span, width: { size: o.width, type: d.WidthType.DXA }, margins: { top: 40, bottom: 40, left: 80, right: 80 },
+        shading: o.head ? { fill: 'eceef1', type: d.ShadingType.CLEAR } : undefined,
+        children: [new d.Paragraph({ alignment: o.right ? d.AlignmentType.RIGHT : d.AlignmentType.LEFT, children: [new d.TextRun({ text: s, bold: !!o.bold, size: 17 })] })] });
+    };
+    var rows = [new d.TableRow({ tableHeader: true, children: keep.map(function (k, j) { return cell(b.head[k], { bold: true, head: true, right: isNum(b, k), width: widths[j] }); }) })], last = null;
+    b.rows.forEach(function (r, ri) {
+      if (b.group >= 0 && r[b.group] !== last) { last = r[b.group]; rows.push(new d.TableRow({ children: [cell(last, { bold: true, span: keep.length, width: TOTAL })] })); }
+      var bold = b.total && ri === b.rows.length - 1;
+      rows.push(new d.TableRow({ children: keep.map(function (k, j) { return cell((b.group >= 0 && k === b.group + 1 ? '   ' : '') + cellText(r[k]), { bold: bold, right: isNum(b, k), width: widths[j] }); }) }));
+    });
+    return new d.Table({ width: { size: TOTAL, type: d.WidthType.DXA }, columnWidths: widths, layout: d.TableLayoutType.FIXED, rows: rows,
+      borders: { top: edge, bottom: edge, left: edge, right: edge, insideHorizontal: edge, insideVertical: edge } });
   }
 
   // ---- Settings: title, which competencies the survey includes, full download, delete
