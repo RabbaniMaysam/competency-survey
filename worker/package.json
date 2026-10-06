@@ -1,0 +1,5 @@
+{
+  "name": "competency-survey-worker",
+  "private": true,
+  "type": "module"
+}

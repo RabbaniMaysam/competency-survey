@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Competency self-assessment</title>
+  <script src="https://accounts.google.com/gsi/client" async></script>
+  <script src="config.js"></script>
+  <style>
+    :root { --ink: #1f2328; --muted: #5c6670; --line: #d8dde3; --bg: #f6f7f9; --card: #fff;
+            --accent: #0b5cad; --ok: #1a7f37; --warn: #b3261e; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink);
+           font: 16px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 20px 16px 120px; }
+    h1 { font-size: 24px; margin: 0 0 4px; }
+    h2 { font-size: 20px; margin: 0 0 4px; }
+    h3 { font-size: 16px; margin: 18px 0 8px; }
+    p { margin: 0 0 10px; }
+    .muted { color: var(--muted); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 16px; }
+    .banner { padding: 10px 14px; border-radius: 8px; margin-top: 12px; }
+    .banner.err { background: #fdecea; color: var(--warn); border: 1px solid #f3c1bc; }
+    .banner.ok { background: #e8f5ec; color: var(--ok); border: 1px solid #b9dfc4; }
+    .banner.note { background: #eef4fb; color: var(--ink); border: 1px solid #c9dbf0; }
+    .standby { padding: 22px 16px; border-radius: 12px; background: #f0f2f5; color: var(--muted); text-align: center; font-size: 18px; margin-top: 16px; }
+    .levels { display: grid; gap: 8px; }
+    .opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 2px solid var(--line); border-radius: 10px;
+           background: #fff; cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%; }
+    .opt:hover { border-color: #a9b8c8; }
+    .opt .n { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); display: flex;
+              align-items: center; justify-content: center; font-weight: 700; color: var(--muted); }
+    .opt .t b { display: block; font-size: 14px; color: var(--muted); font-weight: 600; }
+    .opt.on { border-color: var(--accent); background: #e7f0fb; }
+    .opt.on .n { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .opt.on .t b { color: var(--accent); }
+    .item { padding-top: 2px; scroll-margin-top: 16px; }
+    .item.missing h3 { color: var(--warn); }
+    .item.missing .opt { border-color: #f3c1bc; }
+    .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -2px 10px rgba(0, 0, 0, .08); }
+    .bar div.in { max-width: 760px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .bar .count { font-weight: 600; }
+    .bar .state { color: var(--muted); font-size: 14px; flex: 1; }
+    .meter { height: 6px; background: #e3e7ec; }
+    .meter div { height: 100%; background: var(--accent); }
+    button.go { font: inherit; font-weight: 700; padding: 10px 20px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+    button.go:disabled { opacity: .5; cursor: default; }
+    button.link { border: 0; background: none; color: var(--accent); padding: 0; text-decoration: underline; font: inherit; cursor: pointer; }
+    button.pick { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent); background: #fff; color: var(--accent); cursor: pointer; margin: 6px 6px 0 0; }
+    ul.status { margin: 8px 0 0; padding-left: 20px; }
+    #signin { margin-top: 16px; }
+  </style>
+</head>
+<body>
+<main>
+  <div id="app"><p class="muted">Loading...</p></div>
+  <div id="signin" hidden></div>
+</main>
+<div id="bar" class="bar" hidden></div>
+<script>
+  // The class is chosen by the link (?c=key).
+  var API = (window.SURVEY_API || '').replace(/\/+$/, '');
+  var classKey = new URLSearchParams(location.search).get('c') || '';
+  var TOKEN_KEY = 'survey_token';
+  var TZ = 'America/New_York';
+  var conf = null, token = '', S = null, flash = '', timer = null;
+  var roundId = '';         // the round being answered
+  var draft = {};           // its answers as the student picks them: {itemId: 1..4 or 'na'}
+  var saving = false, dirty = false, saveTimer = null, savedAt = '', saveError = '', showMissing = false, done = '';
+  // The token is kept in localStorage: the Worker's session token (sent after a Google sign-in) lasts months. "Sign out" deletes it.
+  try { token = localStorage.getItem(TOKEN_KEY) || ''; } catch (e) {}
+  tokenFromHash();
+
+  function el(tag, attrs) {
+    var e = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === 'text') e.textContent = attrs[k];
+      else if (k === 'on') Object.keys(attrs.on).forEach(function (ev) { e.addEventListener(ev, attrs.on[ev]); });
+      else if (attrs[k] !== false && attrs[k] !== null) e.setAttribute(k, attrs[k] === true ? '' : attrs[k]);
+    });
+    for (var i = 2; i < arguments.length; i++) {
+      var kid = arguments[i];
+      if (kid === null || kid === undefined || kid === false) continue;
+      e.appendChild(typeof kid === 'string' ? document.createTextNode(kid) : kid);
+    }
+    return e;
+  }
+
+  function setToken(t) {
+    token = t || '';
+    try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+  }
+
+  function api(action, args) {
+    return fetch(API + '/survey', { method: 'POST', body: JSON.stringify({ token: token, class: classKey, action: action, args: args || [] }) })
+      .then(function (r) { return r.json(); })
+      .then(function (out) {
+        if (out.session) setToken(out.session);
+        if (out.ok) return out.state;
+        if (out.error === 'SIGNIN') { setToken(''); S = null; showSignIn(); throw new Error('SIGNIN'); }
+        throw new Error(out.error);
+      });
+  }
+
+  function when(iso) {
+    return new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+  }
+  function clockOf(iso) { return new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(iso)).toLowerCase(); }
+  function cur() { return S && S.rounds.filter(function (r) { return r.id === roundId; })[0]; }
+  function items() {
+    var out = [];
+    S.competencies.forEach(function (c) { c.dims.forEach(function (d) { out.push({ id: c.code + '.' + d.code, name: d.name }); }); });
+    return out;
+  }
+  function answered() { return items().filter(function (i) { return i.id in draft; }).length; }
+
+  /** Loads the state. A survey being answered is left as it is; only the round list and status are refreshed. */
+  function load() {
+    if (!token) return;
+    api('state').then(function (s) {
+      var before = cur();
+      S = s; flash = '';
+      var r = cur();
+      // The round in progress keeps the student's picks; otherwise the round shown is the open one not yet submitted.
+      if (!(r && r.open && before)) {
+        var open = S.rounds.filter(function (x) { return x.open; });
+        var pick = open.filter(function (x) { return !x.submitted; })[0] || open[0] || null;
+        roundId = pick ? pick.id : '';
+        draft = pick ? Object.assign({}, pick.answers) : {};
+        savedAt = pick ? pick.saved : '';
+      }
+      render(); schedule();
+    }).catch(function (e) { if (e.message !== 'SIGNIN') { flash = 'The page could not load. ' + e.message; render(); } });
+  }
+
+  // While no survey is open the page checks every minute, so it shows the survey once the instructor opens it.
+  function schedule() {
+    clearTimeout(timer);
+    if (S && S.authorized && !(cur() && cur().open)) timer = setTimeout(function () { if (!document.hidden) load(); else schedule(); }, 60000);
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && !(cur() && cur().open)) load(); });
+
+  // ---------------------------------------------------------------- answering
+
+  function choose(id, value) {
+    draft[id] = value;
+    done = '';
+    var item = document.getElementById('item-' + id);
+    if (item) {
+      Array.prototype.forEach.call(item.querySelectorAll('.opt'), function (b) { b.classList.toggle('on', b.getAttribute('data-v') === String(value)); });
+      item.classList.remove('missing');
+    }
+    var r = cur();
+    if (r && !r.submitted) { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(save, 1200); }
+    else dirty = true;
+    renderBar();
+  }
+
+  /** Saves the draft (before the first submission). */
+  function save() {
+    var r = cur();
+    if (!r || r.submitted || saving || !dirty) return;
+    saving = true; dirty = false; saveError = ''; renderBar();
+    api('save', [r.id, draft]).then(function (s) {
+      saving = false; S = s; savedAt = cur() ? cur().saved : '';
+      renderBar();
+      if (dirty) save();
+    }).catch(function (e) {
+      saving = false; dirty = true;
+      if (e.message === 'SIGNIN') return;
+      saveError = e.message; renderBar();
+      if (/closed/.test(e.message)) load();
+    });
+  }
+
+  function submit() {
+    var r = cur();
+    var missing = items().filter(function (i) { return !(i.id in draft); });
+    if (missing.length) {
+      showMissing = true;
+      missing.forEach(function (i) { var e = document.getElementById('item-' + i.id); if (e) e.classList.add('missing'); });
+      var first = document.getElementById('item-' + missing[0].id);
+      if (first) first.scrollIntoView({ behavior: 'smooth' });
+      renderBar();
+      return;
+    }
+    clearTimeout(saveTimer);
+    saving = true; saveError = ''; renderBar();
+    var again = !!r.submitted;
+    api('submit', [r.id, draft]).then(function (s) {
+      saving = false; dirty = false; S = s; showMissing = false;
+      savedAt = cur().saved;
+      done = again ? 'Your changes are submitted.' : 'Thank you. Your answers are submitted.';
+      render();
+      window.scrollTo(0, 0);
+    }).catch(function (e) {
+      saving = false;
+      if (e.message === 'SIGNIN') return;
+      saveError = e.message; renderBar();
+      if (/closed/.test(e.message)) load();
+    });
+  }
+
+  window.addEventListener('beforeunload', function (ev) {
+    if (dirty || saving) { ev.preventDefault(); ev.returnValue = ''; }
+  });
+
+  // ---------------------------------------------------------------- sign-in
+
+  function whenGoogleReady(fn) {
+    if (window.google && google.accounts && google.accounts.id) fn();
+    else setTimeout(function () { whenGoogleReady(fn); }, 100);
+  }
+
+  function showSignIn() {
+    var app = document.getElementById('app');
+    var box = document.getElementById('signin');
+    document.getElementById('bar').hidden = true;
+    app.innerHTML = '';
+    app.appendChild(el('h1', { text: conf.title }));
+    app.appendChild(el('p', { class: 'muted', text: 'Sign in with the Google account of the email address your instructor has on file (your university account, not a personal Gmail). You sign in once; this browser stays signed in afterwards.' }));
+    box.hidden = false;
+    box.innerHTML = '';
+    whenGoogleReady(function () { google.accounts.id.renderButton(box, { theme: 'outline', size: 'large', text: 'signin_with' }); });
+    box.appendChild(el('p', { class: 'muted', style: 'margin-top:14px' }, 'Signed in to a personal account on this phone or computer? ',
+      el('button', { class: 'link', text: 'Choose or add the university account', on: { click: chooseAccount } }), '.'));
+  }
+
+  /**
+   * Google's account chooser in this tab, for a browser whose only Google account is the wrong one: the
+   * "Sign in with Google" button then signs in with that account without asking. Google returns to this
+   * page with the ID token in the URL fragment (tokenFromHash); the page's address must be registered as
+   * an authorized redirect URI of the client ID.
+   */
+  function chooseAccount() {
+    var nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { sessionStorage.setItem('signin_nonce', nonce); } catch (e) {}
+    location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+      client_id: conf.clientId, redirect_uri: location.origin + location.pathname, response_type: 'id_token',
+      scope: 'openid email', nonce: nonce, prompt: 'select_account', state: classKey }).toString();
+  }
+
+  function tokenFromHash() {
+    var h = new URLSearchParams(location.hash.replace(/^#/, ''));
+    var t = h.get('id_token');
+    if (!t) return;
+    var nonce = '';
+    try { nonce = sessionStorage.getItem('signin_nonce') || ''; sessionStorage.removeItem('signin_nonce'); } catch (e) {}
+    var p = {};
+    try { var b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); p = JSON.parse(atob(b + '==='.slice(0, (4 - b.length % 4) % 4))); } catch (e) {}
+    if (!classKey) classKey = h.get('state') || '';
+    if (nonce && p.nonce === nonce) setToken(t);
+    history.replaceState(null, '', location.pathname + (classKey ? '?c=' + encodeURIComponent(classKey) : ''));
+  }
+
+  function signOut() {
+    if ((dirty || saving) && !confirm('Your last answers are not saved yet. Sign out anyway?')) return;
+    setToken(''); S = null; clearTimeout(timer); clearTimeout(saveTimer); dirty = false;
+    whenGoogleReady(function () { google.accounts.id.disableAutoSelect(); });
+    showSignIn();
+  }
+
+  function boot() {
+    var app = document.getElementById('app');
+    fetch(API + '/config').then(function (r) { return r.json(); }).then(function (c) {
+      conf = c;
+      var chosen = c.classes.filter(function (x) { return x.key === classKey; })[0] ||
+                   (!classKey && c.classes.length === 1 ? c.classes[0] : null);
+      if (!chosen) {
+        app.innerHTML = '';
+        app.appendChild(el('h1', { text: 'Competency self-assessment' }));
+        if (classKey) app.appendChild(el('div', { class: 'banner err', text: 'This link does not match any class. Check the link your instructor posted.' }));
+        else if (!c.classes.length) app.appendChild(el('div', { class: 'banner err', text: 'No class is configured yet.' }));
+        else app.appendChild(el('p', { text: 'Choose your class:' }));
+        var list = el('ul');
+        if (!classKey) c.classes.forEach(function (x) {
+          list.appendChild(el('li', {}, el('a', { href: '?c=' + encodeURIComponent(x.key), text: x.title || x.key })));
+        });
+        app.appendChild(list);
+        return;
+      }
+      classKey = chosen.key;
+      conf.title = chosen.title;
+      document.title = conf.title + ': self-assessment';
+      whenGoogleReady(function () {
+        google.accounts.id.initialize({
+          client_id: conf.clientId,
+          callback: function (resp) { setToken(resp.credential); document.getElementById('signin').hidden = true; load(); }
+        });
+      });
+      if (token) load(); else showSignIn();
+    }).catch(function () {
+      app.innerHTML = '';
+      app.appendChild(el('div', { class: 'banner err', text: 'The survey service did not respond. Reload the page in a minute.' }));
+    });
+  }
+
+  // ---------------------------------------------------------------- rendering
+
+  function render() {
+    var app = document.getElementById('app');
+    var bar = document.getElementById('bar');
+    app.innerHTML = '';
+    if (!S) { bar.hidden = true; app.appendChild(el('p', { class: flash ? 'banner err' : 'muted', text: flash || 'Loading...' })); return; }
+    document.getElementById('signin').hidden = true;
+    var signOutLink = el('button', { class: 'link', text: 'Sign out', on: { click: signOut } });
+    app.appendChild(el('h1', { text: S.title }));
+    if (!S.authorized && S.instructor) {
+      bar.hidden = true;
+      app.appendChild(el('p', {}, 'This is the student page, and ' + S.email + ' is an instructor account. ',
+        el('a', { href: 'survey_admin.html' + location.search, text: 'Open the instructor page' }), '. ', signOutLink));
+      return;
+    }
+    if (!S.authorized) {
+      bar.hidden = true;
+      app.appendChild(el('div', { class: 'banner err',
+        text: 'The account ' + S.email + ' is not on the class roster. Sign in with the account of the email address your instructor has on file, or contact your instructor.' }));
+      app.appendChild(el('p', {}, signOutLink));
+      return;
+    }
+    app.appendChild(el('p', { class: 'muted' }, S.name + ' (' + S.email + '). ', signOutLink));
+    if (flash) app.appendChild(el('div', { class: 'banner err', text: flash }));
+
+    var r = cur();
+    var open = S.rounds.filter(function (x) { return x.open; });
+    if (!r || !r.open) {
+      bar.hidden = true;
+      app.appendChild(el('div', { class: 'standby', text: 'No survey is open right now. Your instructor will tell you when it opens.' }));
+      app.appendChild(statusList());
+      return;
+    }
+    if (open.length > 1) {
+      var picks = el('p', {}, 'Two surveys are open. You are answering: ' + r.name + '. ');
+      open.forEach(function (x) {
+        if (x.id !== r.id) picks.appendChild(el('button', { class: 'pick', text: 'Switch to ' + x.name, on: { click: function () {
+          if (dirty) save();
+          roundId = x.id; draft = Object.assign({}, x.answers); savedAt = x.saved; done = ''; showMissing = false; render();
+        } } }));
+      });
+      app.appendChild(picks);
+    }
+    app.appendChild(el('h2', { style: 'margin-top:14px', text: 'Competency self-assessment: ' + r.name.toLowerCase() }));
+    if (done) app.appendChild(el('div', { class: 'banner ok', text: done }));
+    if (r.submitted) {
+      app.appendChild(el('div', { class: 'banner note', text: 'You submitted this survey on ' + when(r.submitted) + '. You can change answers and submit again'
+        + (r.closes ? ' until ' + when(r.closes) + '.' : ' while the survey is open.') }));
+    } else {
+      app.appendChild(el('p', {}, 'For each item, choose the description that fits you best. Choose N/A when you have not yet learned or applied it, or do not have enough information to assess yourself. '
+        + 'Your answers are saved as you go, so you can finish later. Submit once every item has an answer'
+        + (r.closes ? ' (by ' + when(r.closes) + ').' : '.')));
+    }
+
+    S.competencies.forEach(function (c) {
+      var card = el('div', { class: 'card' }, el('h2', { text: c.name }), el('p', { class: 'muted', text: c.definition }));
+      c.dims.forEach(function (d) {
+        var id = c.code + '.' + d.code;
+        var box = el('div', { class: 'item' + (showMissing && !(id in draft) ? ' missing' : ''), id: 'item-' + id }, el('h3', { text: d.name }));
+        var list = el('div', { class: 'levels' });
+        d.levels.forEach(function (t, k) {
+          list.appendChild(option(id, k + 1, String(k + 1), S.levels[k], t));
+        });
+        list.appendChild(option(id, 'na', 'N/A', 'Not applicable', S.naText));
+        box.appendChild(list);
+        card.appendChild(box);
+      });
+      app.appendChild(card);
+    });
+    renderBar();
+  }
+
+  function option(id, value, mark, label, text) {
+    return el('button', { type: 'button', class: 'opt' + (String(draft[id]) === String(value) ? ' on' : ''), 'data-v': String(value),
+                          on: { click: function () { choose(id, value); } } },
+      el('span', { class: 'n', text: mark }), el('span', { class: 't' }, el('b', { text: label }), text));
+  }
+
+  function statusList() {
+    var ul = el('ul', { class: 'status' });
+    S.rounds.forEach(function (x) {
+      ul.appendChild(el('li', { text: x.name + ': ' + (x.submitted ? 'submitted ' + when(x.submitted) : x.saved ? 'started, not submitted' : 'not taken') }));
+    });
+    return el('div', { class: 'card' }, el('b', { text: 'Your surveys' }), ul);
+  }
+
+  function renderBar() {
+    var bar = document.getElementById('bar'), r = cur();
+    if (!r || !r.open || !S.authorized) { bar.hidden = true; return; }
+    var n = answered(), total = items().length;
+    var state = saveError ? saveError
+      : saving ? 'Saving...'
+      : r.submitted ? (dirty ? 'Changes not submitted yet.' : 'Submitted ' + when(r.submitted) + '.')
+      : dirty ? 'Not saved yet...'
+      : savedAt ? 'Saved ' + clockOf(savedAt) + '.' : '';
+    if (showMissing && n < total) state = (total - n) + (total - n === 1 ? ' item has' : ' items have') + ' no answer (marked in red).';
+    bar.hidden = false;
+    bar.innerHTML = '';
+    bar.appendChild(el('div', { class: 'meter' }, el('div', { style: 'width:' + Math.round(100 * n / total) + '%' })));
+    bar.appendChild(el('div', { class: 'in' },
+      el('span', { class: 'count', text: n + ' of ' + total + ' answered' }),
+      el('span', { class: 'state', style: saveError || (showMissing && n < total) ? 'color:var(--warn)' : '', text: state }),
+      el('button', { class: 'go', text: r.submitted ? 'Submit changes' : 'Submit', disabled: !!(saving || (r.submitted && !dirty)), on: { click: submit } })));
+  }
+
+  boot();
+</script>
+</body>
+</html>

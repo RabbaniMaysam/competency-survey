@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Competency survey: instructor page</title>
+  <script src="https://accounts.google.com/gsi/client" async></script>
+  <script src="config.js"></script>
+  <style>
+    :root { --ink: #1f2328; --muted: #5c6670; --line: #d8dde3; --bg: #f6f7f9; --card: #fff;
+            --accent: #0b5cad; --ok: #1a7f37; --warn: #b3261e; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink);
+           font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 17px; margin: 0 0 10px; }
+    h3 { font-size: 15px; margin: 14px 0 6px; }
+    p { margin: 0 0 10px; }
+    .muted { color: var(--muted); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 14px; }
+    .banner { padding: 9px 14px; border-radius: 8px; margin-top: 12px; }
+    .banner.err { background: #fdecea; color: var(--warn); border: 1px solid #f3c1bc; }
+    .banner.ok { background: #e8f5ec; color: var(--ok); border: 1px solid #b9dfc4; }
+    .banner.note { background: #fff4d6; color: #6b4e00; border: 1px solid #ecd58f; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+    .scroll { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-top: 1px solid var(--line); white-space: nowrap; }
+    th { border-top: 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+    td.num, th.num { text-align: right; }
+    tr.gone td { color: var(--muted); }
+    tr.detail td { background: #f8fafc; white-space: normal; }
+    .round { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 10px; }
+    .round.open { border-color: var(--ok); background: #f3faf5; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+    .pill.open { background: #dff3e4; color: var(--ok); }
+    .pill.closed { background: #eceff2; color: var(--muted); }
+    .bar { display: inline-block; height: 10px; border-radius: 3px; background: #c9d9ec; vertical-align: middle; }
+    .bar.end { background: #7fa7d6; }
+    button { font: inherit; padding: 4px 11px; border-radius: 6px; border: 1px solid var(--accent);
+             background: var(--accent); color: #fff; cursor: pointer; }
+    button.plain { background: #fff; color: var(--accent); }
+    button.danger { background: #fff; color: var(--warn); border-color: var(--warn); }
+    button.link { border: 0; background: none; color: var(--accent); padding: 0; text-decoration: underline; }
+    button.tab { background: #fff; color: var(--ink); border-color: var(--line); }
+    button.tab.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button:disabled { opacity: .5; cursor: default; }
+    input, select, textarea { font: inherit; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
+    label { display: inline-flex; align-items: center; gap: 6px; }
+    label.comp { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; }
+    label.comp input { margin-top: 3px; }
+    code { background: #eef1f4; padding: 1px 5px; border-radius: 4px; }
+    .veil { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: flex; align-items: center;
+            justify-content: center; padding: 16px; z-index: 10; }
+    .modal { background: #fff; border-radius: 10px; padding: 20px; width: 100%; max-width: 480px;
+             box-shadow: 0 10px 40px rgba(0, 0, 0, .3); }
+    .modal h2 { margin-bottom: 8px; }
+    .modal p { margin: 0 0 8px; }
+    .modal .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+    button.danger.solid { background: var(--warn); color: #fff; }
+  </style>
+</head>
+<body>
+<main>
+  <div id="app"><p class="muted">Loading...</p></div>
+  <div id="signin" hidden></div>
+</main>
+<script>
+  var API = (window.SURVEY_API || '').replace(/\/+$/, '');
+  var TOKEN_KEY = 'survey_admin_token';  // this tool's own key: other tools' pages share the origin and keep their own tokens
+  var TZ = 'America/New_York';
+  var TABS = ['Overview', 'Responses', 'Results', 'Settings', 'Roster', 'Log'];
+  var token = '', me = '', classes = [], cur = '', D = null, tab = 'Overview';
+  var flash = null, busy = false, timer = null, openRow = '';
+  // The token is kept in localStorage: the Worker's session token (sent after a Google sign-in) lasts months. "Sign out" deletes it.
+  try { token = localStorage.getItem(TOKEN_KEY) || ''; cur = new URLSearchParams(location.search).get('c') || sessionStorage.getItem('survey_admin_class') || ''; } catch (e) {}
+
+  // ---------------------------------------------------------------- plumbing
+
+  function el(tag, attrs) {
+    var e = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === 'text') e.textContent = attrs[k];
+      else if (k === 'value') e.value = attrs[k];
+      else if (k === 'on') Object.keys(attrs.on).forEach(function (ev) { e.addEventListener(ev, attrs.on[ev]); });
+      else if (attrs[k] !== false && attrs[k] !== null) e.setAttribute(k, attrs[k] === true ? '' : attrs[k]);
+    });
+    for (var i = 2; i < arguments.length; i++) {
+      var kid = arguments[i];
+      if (kid === null || kid === undefined || kid === false) continue;
+      e.appendChild(typeof kid === 'string' ? document.createTextNode(kid) : kid);
+    }
+    return e;
+  }
+
+  function setToken(t) {
+    token = t || '';
+    try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+  }
+
+  function setClass(key) {
+    cur = key || ''; D = null; settingsDraft = null; logRows = null; openRow = '';
+    try { sessionStorage.setItem('survey_admin_class', cur); } catch (e) {}
+  }
+
+  function call(action, args, key) {
+    return fetch(API + '/admin', { method: 'POST',
+      body: JSON.stringify({ token: token, class: key === undefined ? cur : key, action: action, args: args || [] }) })
+      .then(function (r) { return r.json(); })
+      .then(function (out) {
+        if (out.session) setToken(out.session);
+        if (out.ok) return out.data;
+        if (out.error === 'SIGNIN') { var why = token.indexOf('s1.') === 0 ? 'session' : 'google'; setToken(''); showSignIn(why); throw new Error('SIGNIN'); }
+        throw new Error(out.error);
+      });
+  }
+
+  function fail(e) {
+    busy = false;
+    if (e.message === 'SIGNIN') return;
+    flash = { err: e.message }; render();
+  }
+
+  /** Runs one instructor action on the current class and redraws. */
+  function run(action, args, okText) {
+    busy = true; flash = null; render();
+    call(action, args).then(function (d) {
+      busy = false; D = d; flash = okText ? { ok: okText } : null;
+      render();
+      if (action === 'saveSettings') refreshClasses();
+    }).catch(fail);
+  }
+
+  function refreshClasses() {
+    call('whoami', [], '').then(function (d) { classes = d.classes; render(); }).catch(function () {});
+  }
+
+  function loadClass(quiet) {
+    if (!cur) { render(); return; }
+    call('get').then(function (d) {
+      D = d;
+      // A quiet refresh leaves a form the instructor is typing in alone.
+      var a = document.activeElement, typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'checkbox';
+      if (!busy && !(quiet && typing)) render();
+    }).catch(function (e) { if (!quiet) fail(e); });
+  }
+
+  // The Overview, Responses, and Results tabs refresh every 30 seconds, so new submissions appear.
+  function poll() {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if ((tab === 'Overview' || tab === 'Responses' || tab === 'Results') && cur && !document.hidden) loadClass(true);
+      poll();
+    }, 30000);
+  }
+
+  function start() {
+    call('whoami', [], '').then(function (d) {
+      me = d.email; classes = d.classes;
+      if (!classes.some(function (c) { return c.key === cur; })) setClass(classes.length ? classes[0].key : '');
+      loadClass(false); poll();
+    }).catch(function (e) {
+      if (e.message === 'SIGNIN') return;
+      var app = document.getElementById('app');
+      app.innerHTML = '';
+      app.appendChild(el('div', { class: 'banner err', text: e.message }));
+      app.appendChild(el('p', {}, el('button', { class: 'link', text: 'Sign out', on: { click: signOut } })));
+    });
+  }
+
+  // ---------------------------------------------------------------- sign-in
+
+  function whenGoogleReady(fn) {
+    if (window.google && google.accounts && google.accounts.id) fn();
+    else setTimeout(function () { whenGoogleReady(fn); }, 100);
+  }
+
+  // Why the sign-in screen is shown, for diagnosing a sign-in that does not persist.
+  var SIGNIN_WHY = {
+    none: 'Why this screen: this browser had no saved sign-in (a first visit in this browser or profile, a private window, or a browser that deletes site data).',
+    google: 'Why this screen: the saved sign-in was Google\'s one-hour sign-in and it expired.',
+    session: 'Why this screen: the server refused the saved 180-day sign-in.'
+  };
+
+  function showSignIn(why) {
+    var app = document.getElementById('app'), box = document.getElementById('signin');
+    app.innerHTML = '';
+    app.appendChild(el('h1', { text: 'Competency survey: instructor page' }));
+    app.appendChild(el('p', { class: 'muted', text: 'Sign in with an instructor account.' }));
+    if (SIGNIN_WHY[why]) app.appendChild(el('p', { class: 'muted', text: SIGNIN_WHY[why] }));
+    box.hidden = false; box.innerHTML = '';
+    whenGoogleReady(function () { google.accounts.id.renderButton(box, { theme: 'outline', size: 'large', text: 'signin_with' }); });
+  }
+
+  function signOut() {
+    leaveSettings().then(function (go) {
+      if (!go) return;
+      setToken(''); D = null; settingsDraft = null;
+      whenGoogleReady(function () { google.accounts.id.disableAutoSelect(); });
+      showSignIn();
+    });
+  }
+
+  function boot() {
+    var app = document.getElementById('app');
+    fetch(API + '/config').then(function (r) { return r.json(); }).then(function (c) {
+      whenGoogleReady(function () {
+        google.accounts.id.initialize({ client_id: c.clientId, callback: function (resp) {
+          setToken(resp.credential);
+          document.getElementById('signin').hidden = true;
+          start();
+        } });
+      });
+      if (token) start(); else showSignIn('none');
+    }).catch(function () {
+      app.innerHTML = '';
+      app.appendChild(el('div', { class: 'banner err', text: 'The survey service did not respond. Reload the page in a minute.' }));
+    });
+  }
+
+  // ---------------------------------------------------------------- helpers
+
+  function isoClock(iso) { return new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)); }
+  function isoFull(iso) { return new Intl.DateTimeFormat('en-US', { timeZone: TZ, year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(new Date(iso)); }
+  function today() { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date()); }
+  function fullName(r) { return (r.first + ' ' + r.last).trim(); }
+  function studentLink() { return location.href.replace(/survey_admin\.html.*$/, '') + 'survey.html?c=' + encodeURIComponent(cur); }
+  function button(label, cls, fn) { return el('button', { text: label, class: cls, disabled: busy, on: { click: fn } }); }
+  function isOn(code) { return D.state.off.indexOf(code) === -1; }
+  function activeItems() { return D.items.filter(function (i) { return isOn(i.comp); }); }
+  function responsesOf(round) { return D.responses.filter(function (x) { return x.round === round; }); }
+  function answeredCount(x) { return activeItems().filter(function (i) { return i.id in x.answers; }).length; }
+  function levelText(v) { return v === 'na' ? 'N/A' : v ? v + ' ' + D.levels[v - 1] : ''; }
+  /** A value for a datetime-local input: the given time in this computer's time zone. */
+  function localInput(ms) { var d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); }
+
+  function download(name, rows) {
+    var csv = rows.map(function (r) {
+      return r.map(function (v) { return '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"'; }).join(',');
+    }).join('\r\n');
+    var a = el('a', { href: URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })), download: name });
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  /** A dialog with the given buttons [{label, value, cls}]; resolves the chosen value, or null on Cancel, Esc, or a click outside. */
+  function choose(title, lines, buttons) {
+    return new Promise(function (resolve) {
+      var veil;
+      var done = function (v) { veil.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+      var onKey = function (ev) { if (ev.key === 'Escape') done(null); };
+      var box = el('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true' }, el('h2', { text: title }));
+      lines.forEach(function (l) { box.appendChild(el('p', { text: l })); });
+      var row = el('div', { class: 'buttons' }, el('button', { class: 'plain', text: 'Cancel', on: { click: function () { done(null); } } }));
+      var first = null;
+      buttons.forEach(function (b) {
+        var btn = el('button', { text: b.label, class: b.cls || '', on: { click: function () { done(b.value); } } });
+        row.appendChild(btn); first = first || btn;
+      });
+      box.appendChild(row);
+      veil = el('div', { class: 'veil', on: { click: function (ev) { if (ev.target === veil) done(null); } } }, box);
+      document.body.appendChild(veil);
+      document.addEventListener('keydown', onKey);
+      first.focus();
+    });
+  }
+
+  function ask(title, lines, okLabel, danger) {
+    return choose(title, lines, [{ label: okLabel, value: true, cls: danger ? 'danger solid' : '' }]).then(function (v) { return v === true; });
+  }
+
+  // Unsaved edits on the Settings tab: kept in settingsDraft across redraws, and checked before the tab, class, or sign-in changes.
+  var settingsDraft = null;
+  function settingsOf(S) { return { title: S.title, off: S.off.slice() }; }
+  function settingsDirty() { return !!(settingsDraft && D && JSON.stringify(settingsDraft) !== JSON.stringify(settingsOf(D.state))); }
+  /** Resolves true when it is fine to leave the Settings form (nothing to save, saved, or discarded), false to stay. */
+  function leaveSettings() {
+    if (!settingsDirty()) return Promise.resolve(true);
+    return choose('Save the settings?', ['You changed the settings but did not save them.'],
+      [{ label: "Don't save", value: 'discard', cls: 'plain' }, { label: 'Save', value: 'save' }]).then(function (v) {
+      if (v === 'discard') { settingsDraft = null; return true; }
+      if (v !== 'save') return false;
+      busy = true; flash = null;
+      return call('saveSettings', [settingsDraft]).then(function (d) {
+        busy = false; D = d; settingsDraft = null; flash = { ok: 'Settings saved.' }; refreshClasses(); return true;
+      }).catch(function (e) { fail(e); return false; });
+    });
+  }
+  window.addEventListener('beforeunload', function (ev) { if (settingsDirty()) { ev.preventDefault(); ev.returnValue = ''; } });
+
+  /** Downloads everything stored about the class (settings, roster, answers, log) as one JSON file. */
+  function exportAll() {
+    busy = true; flash = null; render();
+    call('export').then(function (d) {
+      var a = el('a', { href: URL.createObjectURL(new Blob([JSON.stringify(d, null, 1)], { type: 'application/json' })), download: 'survey_' + cur + '_' + today() + '_full.json' });
+      document.body.appendChild(a); a.click(); a.remove();
+      busy = false; flash = { ok: 'Downloaded. Keep the file somewhere safe.' }; render();
+    }).catch(fail);
+  }
+
+  // ---------------------------------------------------------------- rendering
+
+  function render() {
+    var app = document.getElementById('app');
+    var keepScroll = window.scrollY;
+    app.innerHTML = '';
+    document.getElementById('signin').hidden = true;
+    app.appendChild(el('h1', { text: 'Competency survey: instructor page' }));
+    app.appendChild(el('p', { class: 'muted' }, 'Signed in as ' + me + '. ',
+      el('button', { class: 'link', text: 'Sign out', on: { click: signOut } })));
+
+    // class chooser and creation
+    var chooser = el('div', { class: 'row' });
+    if (classes.length) {
+      var sel = el('select', { disabled: busy, on: { change: function (ev) {
+        var key = ev.target.value;
+        flash = null;
+        leaveSettings().then(function (go) { if (!go) { ev.target.value = cur; return; } setClass(key); loadClass(false); });
+      } } });
+      classes.forEach(function (c) { sel.appendChild(el('option', { value: c.key, text: (c.title || c.key) + ' (' + c.key + ')' })); });
+      sel.value = cur;
+      chooser.appendChild(el('label', {}, 'Class ', sel));
+    }
+    var keyIn = el('input', { type: 'text', placeholder: 'new key, e.g. bus101-fall2026', size: 26 });
+    var titleIn = el('input', { type: 'text', placeholder: 'title, e.g. BUS 101 Fall 2026', size: 26 });
+    chooser.appendChild(el('span', { class: 'muted', text: classes.length ? 'or create:' : 'Create a class:' }));
+    chooser.appendChild(keyIn); chooser.appendChild(titleIn);
+    chooser.appendChild(button('Create', 'plain', function () {
+      busy = true; flash = null;
+      call('createClass', [keyIn.value, titleIn.value], '').then(function (d) {
+        busy = false; classes = d.classes; setClass(d.key); flash = { ok: 'Class created. Import the roster, then open the start-of-semester survey on the Overview tab.' };
+        tab = 'Roster'; loadClass(false);
+      }).catch(fail);
+    }));
+    app.appendChild(el('div', { class: 'card' }, chooser,
+      cur ? el('p', { class: 'muted', style: 'margin:0' }, 'Student link: ', el('code', { text: studentLink() }), ' ',
+        el('button', { class: 'link', text: 'Copy', on: { click: function () {
+          (navigator.clipboard ? navigator.clipboard.writeText(studentLink()) : Promise.reject()).then(function () { flash = { ok: 'Link copied.' }; render(); }, function () {});
+        } } })) : null));
+    if (flash) app.appendChild(el('div', { class: 'banner ' + (flash.err ? 'err' : 'ok'), text: flash.err || flash.ok }));
+    if (!cur) { app.appendChild(el('p', { class: 'muted', style: 'margin-top:12px', text: 'No class exists yet. Create one above.' })); return; }
+    if (!D) { app.appendChild(el('p', { class: 'muted', text: 'Loading...' })); return; }
+
+    var tabs = el('div', { class: 'tabs' });
+    TABS.forEach(function (t) {
+      tabs.appendChild(el('button', { class: 'tab' + (t === tab ? ' on' : ''), text: t, on: { click: function () {
+        flash = null;
+        leaveSettings().then(function (go) { if (!go) return; tab = t; render(); poll(); if (t === 'Log' && logRows === null) loadLog(); });
+      } } }));
+    });
+    app.appendChild(tabs);
+    var card = el('div', { class: 'card' });
+    ({ Overview: overview, Responses: responses, Results: results, Settings: settings, Roster: roster, Log: logTab })[tab](card);
+    app.appendChild(card);
+    window.scrollTo(0, keepScroll);
+  }
+
+  // ---- Overview: the two rounds, opened and closed by hand, with an optional closing time
+  function overview(card) {
+    var S = D.state, n = S.roster.length;
+    var on = D.competencies.filter(function (c) { return isOn(c.code); });
+    card.appendChild(el('p', {}, S.roster.length + ' students on the roster. The survey has ' + activeItems().length + ' items in ' + on.length + ' competencies'
+      + (S.off.length ? ' (turned off: ' + D.competencies.filter(function (c) { return !isOn(c.code); }).map(function (c) { return c.name; }).join(', ') + '; see Settings).' : '.')));
+    if (!n) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'The roster is empty: import it on the Roster tab before opening a survey. Only students on the roster can answer.' }));
+    S.rounds.forEach(function (r) {
+      var open = D.open.indexOf(r.id) !== -1, rows = responsesOf(r.id);
+      var onRoster = function (x) { return S.roster.some(function (s) { return s.email === x.email; }); };
+      var sub = rows.filter(function (x) { return x.submitted && onRoster(x); }).length;
+      var started = rows.filter(function (x) { return !x.submitted && onRoster(x); }).length;
+      var box = el('div', { class: 'round' + (open ? ' open' : '') });
+      box.appendChild(el('h2', {}, r.name + ' ', el('span', { class: 'pill ' + (open ? 'open' : 'closed'), text: open ? 'OPEN' : 'CLOSED' })));
+      var status = open
+        ? 'Opened ' + isoClock(r.openedAt) + '. ' + (r.closes ? 'Closes by itself ' + isoClock(r.closes) + '.' : 'Open until you close it.')
+        : r.openedAt ? 'Opened ' + isoClock(r.openedAt) + ', closed ' + isoClock(r.closedAt || r.closes) + '.' : 'Not opened yet.';
+      box.appendChild(el('p', { text: status }));
+      box.appendChild(el('p', {}, el('b', { text: sub + ' of ' + n + ' submitted' }), started ? ', ' + started + ' started but not submitted.' : '.'));
+      var closesIn = el('input', { type: 'datetime-local', value: r.closes && open ? localInput(Date.parse(r.closes)) : '' });
+      var iso = function () { return closesIn.value ? new Date(closesIn.value).toISOString() : ''; };
+      if (open) {
+        box.appendChild(el('div', { class: 'row' },
+          button('Close now', '', function () {
+            ask('Close the ' + r.name.toLowerCase() + ' survey?', ['Students can no longer answer or change answers. ' + (n - sub) + ' of ' + n + ' have not submitted. You can open it again later.'], 'Close', false)
+              .then(function (yes) { if (yes) run('closeRound', [r.id], r.name + ' is closed.'); });
+          }),
+          el('span', { class: 'muted', text: '·' }),
+          el('label', {}, 'Closing time ', closesIn),
+          button('Set', 'plain', function () { run('setCloses', [r.id, iso()], closesIn.value ? 'Closing time set.' : 'No closing time: open until you close it.'); }),
+          el('span', { class: 'muted', text: 'Empty: open until you close it.' })));
+      } else {
+        box.appendChild(el('div', { class: 'row' },
+          button(r.openedAt ? 'Open again' : 'Open now', '', function () {
+            var lines = ['Students on the roster can answer on the student page until it closes. Answers already given are kept.'];
+            if (!n) lines.unshift('The roster is empty, so nobody can answer yet.');
+            ask('Open the ' + r.name.toLowerCase() + ' survey?', lines, 'Open', false)
+              .then(function (yes) { if (yes) run('openRound', [r.id, iso()], r.name + ' is open.'); });
+          }),
+          el('label', {}, 'closes by itself at ', closesIn),
+          el('span', { class: 'muted', text: '(optional; empty: open until you close it)' })));
+      }
+      card.appendChild(box);
+    });
+    card.appendChild(el('p', { class: 'muted', style: 'margin-top:12px', text: 'Students answer each item with one of the four levels or N/A. Answers are saved as they go; the survey counts as submitted once every item has an answer and the student presses Submit. While the survey is open, a student can change answers and submit again; the first submission time is kept.' }));
+  }
+
+  // ---- Responses: one row per student, the status of each round, and each student's answers
+  function responses(card) {
+    var S = D.state, items = activeItems();
+    var byKey = {};
+    D.responses.forEach(function (x) { byKey[x.round + '|' + x.email] = x; });
+    var people = S.roster.map(function (r) { return { r: r, email: r.email, gone: false }; });
+    D.responses.forEach(function (x) {
+      if (!people.some(function (p) { return p.email === x.email; })) people.push({ r: null, email: x.email, gone: true });
+    });
+    card.appendChild(el('div', { class: 'row' }, button('Download CSV', 'plain', function () { downloadAnswers(people, byKey); }),
+      el('span', { class: 'muted', text: 'One row per student and survey: the status, the times, and the answer to each item (1 to 4, or NA; blank when not answered).' })));
+    if (!people.length) { card.appendChild(el('p', { class: 'muted', text: 'No students on the roster yet.' })); return; }
+    var head = el('tr', {}, el('th', { text: 'Student' }), el('th', { text: 'Email' }));
+    S.rounds.forEach(function (r) { head.appendChild(el('th', { text: r.name })); });
+    head.appendChild(el('th', {}));
+    var t = el('table', {}, head);
+    people.forEach(function (p) {
+      var tr = el('tr', { class: p.gone ? 'gone' : '' }, el('td', { text: p.gone ? '(not on the roster)' : p.r.last + ', ' + p.r.first }), el('td', { text: p.email }));
+      var any = false;
+      S.rounds.forEach(function (r) {
+        var x = byKey[r.id + '|' + p.email];
+        if (x) any = true;
+        tr.appendChild(el('td', { style: x && x.submitted ? 'color:var(--ok)' : '',
+          text: !x ? '' : x.submitted ? 'Submitted ' + isoClock(x.submitted) : 'Started, ' + answeredCount(x) + ' of ' + items.length + ' answered' }));
+      });
+      var k = p.email;
+      tr.appendChild(el('td', {}, any ? el('button', { class: 'link', text: openRow === k ? 'Hide answers' : 'Show answers', on: { click: function () { openRow = openRow === k ? '' : k; render(); } } }) : null));
+      t.appendChild(tr);
+      if (openRow === k) t.appendChild(el('tr', { class: 'detail' }, el('td', { colspan: S.rounds.length + 3 }, answersTable(p, byKey))));
+    });
+    card.appendChild(el('div', { class: 'scroll' }, t));
+  }
+
+  /** One student's answers, an item per row, a column per round, with a "Delete answers" button per round. */
+  function answersTable(p, byKey) {
+    var S = D.state, name = p.r ? fullName(p.r) : p.email;
+    var head = el('tr', {}, el('th', { text: 'Competency' }), el('th', { text: 'Item' }));
+    var foot = el('tr', {}, el('td', {}), el('td', {}));
+    S.rounds.forEach(function (r) {
+      var x = byKey[r.id + '|' + p.email];
+      head.appendChild(el('th', { text: r.name }));
+      foot.appendChild(el('td', {}, x ? button('Delete answers', 'danger', function () {
+        ask('Delete ' + name + '\'s answers to the ' + r.name.toLowerCase() + ' survey?', ['The student starts this survey again from an empty form (if it is open). This cannot be undone.'], 'Delete', true)
+          .then(function (yes) { if (yes) run('deleteResponse', [r.id, p.email], 'Answers deleted.'); });
+      }) : null));
+    });
+    var t = el('table', { style: 'width:auto' }, head);
+    D.items.forEach(function (i) {
+      var vals = S.rounds.map(function (r) { var x = byKey[r.id + '|' + p.email]; return x ? x.answers[i.id] : undefined; });
+      if (!isOn(i.comp) && vals.every(function (v) { return v === undefined; })) return;
+      var tr = el('tr', {}, el('td', { text: i.compName + (isOn(i.comp) ? '' : ' (off)') }), el('td', { text: i.dimName }));
+      vals.forEach(function (v) { tr.appendChild(el('td', { text: levelText(v) })); });
+      t.appendChild(tr);
+    });
+    t.appendChild(foot);
+    return t;
+  }
+
+  function downloadAnswers(people, byKey) {
+    var S = D.state;
+    // Every item with an answer anywhere, or turned on, in survey order.
+    var cols = D.items.filter(function (i) { return isOn(i.comp) || D.responses.some(function (x) { return i.id in x.answers; }); });
+    var head = ['Last name', 'First name', 'Email', 'On roster', 'Survey', 'Status', 'Submitted', 'Last change']
+      .concat(cols.map(function (i) { return i.compName + ': ' + i.dimName; }));
+    var rows = [head];
+    people.forEach(function (p) {
+      S.rounds.forEach(function (r) {
+        var x = byKey[r.id + '|' + p.email];
+        if (!x && p.gone) return;
+        rows.push([p.r ? p.r.last : '', p.r ? p.r.first : '', p.email, p.gone ? 'no' : 'yes', r.name,
+          !x ? 'not started' : x.submitted ? 'submitted' : 'started', x && x.submitted ? isoFull(x.submitted) : '', x ? isoFull(x.saved) : '']
+          .concat(cols.map(function (i) { var v = x ? x.answers[i.id] : undefined; return v === undefined ? '' : v === 'na' ? 'NA' : v; })));
+      });
+    });
+    download('survey_' + cur + '_' + today() + '.csv', rows);
+  }
+
+  // ---- Results: per item, the mean level of submitted answers of each round (N/A excluded)
+  function results(card) {
+    var S = D.state, onRoster = {};
+    S.roster.forEach(function (r) { onRoster[r.email] = true; });
+    var sub = {};
+    S.rounds.forEach(function (r) { sub[r.id] = responsesOf(r.id).filter(function (x) { return x.submitted && onRoster[x.email]; }); });
+    card.appendChild(el('p', { class: 'muted', text: 'Submitted surveys of students on the roster: ' + S.rounds.map(function (r) { return r.name.toLowerCase() + ' ' + sub[r.id].length; }).join(', ')
+      + '. Mean level from 1 (' + D.levels[0] + ') to 4 (' + D.levels[3] + '); N/A answers are left out of the mean and counted separately. "Both" is the change for students who submitted both surveys.' }));
+    var stat = function (list, id) {
+      var v = list.map(function (x) { return x.answers[id]; }).filter(function (a) { return a !== undefined; });
+      var nums = v.filter(function (a) { return a !== 'na'; }).map(Number);
+      return { n: nums.length, na: v.length - nums.length, mean: nums.length ? nums.reduce(function (a, b) { return a + b; }, 0) / nums.length : null };
+    };
+    var a = S.rounds[0], b = S.rounds[1];
+    var paired = sub[a.id].map(function (x) { return [x, sub[b.id].filter(function (y) { return y.email === x.email; })[0]]; }).filter(function (q) { return q[1]; });
+    var fmt = function (m) { return m === null ? '' : m.toFixed(2); };
+    var barOf = function (m, cls) { return m === null ? null : el('span', { class: 'bar' + cls, style: 'width:' + Math.round(m * 25) + 'px' }); };
+    var t = el('table', { style: 'width:auto' }, el('tr', {}, el('th', { text: 'Item' }),
+      el('th', { class: 'num', text: a.name }), el('th', { class: 'num', text: 'N (N/A)' }),
+      el('th', { class: 'num', text: b.name }), el('th', { class: 'num', text: 'N (N/A)' }), el('th', {}),
+      el('th', { class: 'num', text: 'Both: change' }), el('th', { class: 'num', text: 'N' })));
+    var rows = [];
+    D.competencies.filter(function (c) { return isOn(c.code); }).forEach(function (c) {
+      t.appendChild(el('tr', {}, el('td', { colspan: 8, style: 'font-weight:700; padding-top:12px', text: c.name })));
+      c.dims.forEach(function (d) {
+        var id = c.code + '.' + d.code, s1 = stat(sub[a.id], id), s2 = stat(sub[b.id], id);
+        var diffs = paired.map(function (q) { return [q[0].answers[id], q[1].answers[id]]; })
+          .filter(function (v) { return v[0] !== undefined && v[1] !== undefined && v[0] !== 'na' && v[1] !== 'na'; })
+          .map(function (v) { return Number(v[1]) - Number(v[0]); });
+        var ch = diffs.length ? diffs.reduce(function (x, y) { return x + y; }, 0) / diffs.length : null;
+        rows.push([c.name, d.name, fmt(s1.mean), s1.n, s1.na, fmt(s2.mean), s2.n, s2.na, ch === null ? '' : ch.toFixed(2), diffs.length]);
+        t.appendChild(el('tr', {}, el('td', { style: 'padding-left:18px', text: d.name }),
+          el('td', { class: 'num', text: fmt(s1.mean) }), el('td', { class: 'num muted', text: s1.n + ' (' + s1.na + ')' }),
+          el('td', { class: 'num', text: fmt(s2.mean) }), el('td', { class: 'num muted', text: s2.n + ' (' + s2.na + ')' }),
+          el('td', {}, barOf(s1.mean, ''), el('br'), barOf(s2.mean, ' end')),
+          el('td', { class: 'num', text: ch === null ? '' : (ch > 0 ? '+' : '') + ch.toFixed(2) }), el('td', { class: 'num muted', text: String(diffs.length) })));
+      });
+    });
+    card.appendChild(el('div', { class: 'row' }, button('Download CSV', 'plain', function () {
+      download('survey_results_' + cur + '_' + today() + '.csv', [['Competency', 'Item', a.name + ' mean', a.name + ' N', a.name + ' N/A',
+        b.name + ' mean', b.name + ' N', b.name + ' N/A', 'Change (students with both)', 'Students with both']].concat(rows));
+    }), el('span', { class: 'muted' }, el('span', { class: 'bar', style: 'width:20px' }), ' ' + a.name.toLowerCase() + '  ', el('span', { class: 'bar end', style: 'width:20px' }), ' ' + b.name.toLowerCase())));
+    card.appendChild(el('div', { class: 'scroll' }, t));
+  }
+
+  // ---- Settings: title, which competencies the survey includes, full download, delete
+  function settings(card) {
+    var S = D.state, v = settingsDraft || settingsOf(S);
+    var anyOpen = D.open.length > 0;
+    var title = el('input', { type: 'text', value: v.title, size: 40 });
+    var note = el('span', { class: 'muted' });
+    var boxes = D.competencies.map(function (c) {
+      var cb = el('input', { type: 'checkbox' }); cb.checked = v.off.indexOf(c.code) === -1;
+      return { c: c, cb: cb };
+    });
+    var form = function () { return { title: title.value, off: boxes.filter(function (b) { return !b.cb.checked; }).map(function (b) { return b.c.code; }) }; };
+    var edited = function () { settingsDraft = form(); note.textContent = settingsDirty() ? 'Unsaved changes.' : ''; };
+    title.addEventListener('input', edited);
+    boxes.forEach(function (b) { b.cb.addEventListener('change', edited); });
+
+    card.appendChild(el('h2', { text: 'Class' }));
+    card.appendChild(el('div', { class: 'row' }, el('label', {}, 'Title ', title)));
+    card.appendChild(el('h2', { text: 'Competencies in the survey', style: 'margin-top:16px' }));
+    card.appendChild(el('p', { class: 'muted', text: 'Unchecked competencies are left out of the survey for both rounds. Equity & Inclusion is off by default. Turning a competency off keeps the answers students gave to it; turning it on adds its items, which students who have submitted then answer by submitting again.' }));
+    if (anyOpen) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'A survey is open: a change applies to students the next time their page loads. Change the competencies before opening a survey where possible.' }));
+    boxes.forEach(function (b) {
+      card.appendChild(el('label', { class: 'comp' }, b.cb, el('span', {}, el('b', { text: b.c.name }), ' (' + b.c.dims.length + ' items)' + (b.c.offByDefault ? ', off by default' : ''),
+        el('br'), el('span', { class: 'muted', text: b.c.dims.map(function (d) { return d.name; }).join('; ') }))));
+    });
+    card.appendChild(el('div', { class: 'row', style: 'margin-top:10px' }, button('Save', '', function () {
+      edited();
+      busy = true; flash = null;
+      call('saveSettings', [settingsDraft]).then(function (d) {
+        busy = false; D = d; settingsDraft = null; flash = { ok: 'Settings saved.' }; render(); refreshClasses();
+      }).catch(fail);
+    }), button('Discard', 'plain', function () { settingsDraft = null; render(); }), note));
+    edited();
+
+    card.appendChild(el('h2', { text: 'Download everything', style: 'margin-top:18px' }));
+    card.appendChild(el('div', { class: 'row' }, button('Download JSON', 'plain', exportAll),
+      el('span', { class: 'muted', text: 'One file with the settings, roster, every answer, and the whole log. The server is also backed up daily.' })));
+
+    card.appendChild(el('h2', { text: 'Delete this class', style: 'margin-top:18px' }));
+    var conf = el('input', { type: 'text', placeholder: 'type the class key: ' + cur, size: 30 });
+    card.appendChild(el('div', { class: 'row' }, conf, button('Delete class', 'danger', function () {
+      ask('Delete ' + cur + '?', ['Its roster, settings, every answer, and its log are deleted. This cannot be undone.'], 'Delete class', true).then(function (yes) {
+        if (!yes) return;
+        busy = true;
+        call('deleteClass', [conf.value]).then(function (d) { busy = false; classes = d.classes; settingsDraft = null; setClass(classes.length ? classes[0].key : ''); flash = { ok: 'Class deleted.' }; loadClass(false); }).catch(fail);
+      });
+    })));
+  }
+
+  // ---- Roster
+  function roster(card) {
+    var S = D.state;
+    card.appendChild(el('h2', { text: 'Roster (' + S.roster.length + ')' }));
+    var file = el('input', { type: 'file', accept: '.csv,text/csv' });
+    card.appendChild(el('p', { class: 'muted', text: 'The Canvas gradebook export ("Student" as "Last, First" and "SIS Login ID"; the Points Possible row and the test student are skipped), or a CSV with first name, last name, and email columns. Addresses at mail.montclair.edu are stored as montclair.edu; students may sign in with either. Importing replaces the roster; answers of students who are dropped are kept and listed on the Responses tab as not on the roster.' }));
+    card.appendChild(el('div', { class: 'row' }, file, button('Import', '', function () {
+      if (!file.files.length) { flash = { err: 'Choose a CSV file first.' }; render(); return; }
+      ask('Replace the roster?', ['The current ' + S.roster.length + ' students are replaced by the file\'s rows.'], 'Import', S.roster.length > 0).then(function (yes) {
+        if (!yes) return;
+        var reader = new FileReader();
+        reader.onload = function () { run('importRoster', [String(reader.result)], 'Roster imported.'); };
+        reader.readAsText(file.files[0]);
+      });
+    })));
+    var aFirst = el('input', { type: 'text', placeholder: 'first name', size: 14 }), aLast = el('input', { type: 'text', placeholder: 'last name', size: 14 });
+    var aMail = el('input', { type: 'text', placeholder: 'email or Montclair login ID', size: 26 });
+    card.appendChild(el('div', { class: 'row', style: 'margin-top:10px' }, el('span', { class: 'muted', text: 'Add one student:' }), aFirst, aLast, aMail,
+      button('Add', 'plain', function () { run('addStudent', [aFirst.value, aLast.value, aMail.value], 'Student added.'); })));
+    if (!S.roster.length) return;
+    var t = el('table', {}, el('tr', {}, el('th', { text: 'Last name' }), el('th', { text: 'First name' }), el('th', { text: 'Email' }), el('th', {})));
+    S.roster.forEach(function (r) {
+      t.appendChild(el('tr', {}, el('td', { text: r.last }), el('td', { text: r.first }), el('td', { text: r.email }),
+        el('td', {}, button('Remove', 'danger', function () {
+          ask('Remove ' + fullName(r) + '?', ['The student can no longer answer. Answers given so far are kept and listed as not on the roster.'], 'Remove', true)
+            .then(function (yes) { if (yes) run('removeStudent', [r.email], fullName(r) + ' removed.'); });
+        }))));
+    });
+    card.appendChild(el('div', { class: 'scroll' }, t));
+  }
+
+  // ---- Log: students' starts and submissions, every instructor action, and every refused attempt
+  var logRows = null, logQuery = '', logWho = 'all';
+  function loadLog() {
+    call('log', [logQuery, logWho, 2000]).then(function (d) { logRows = d.rows; render(); }).catch(fail);
+  }
+  function logTab(card) {
+    var q = el('input', { type: 'search', value: logQuery, placeholder: 'search (name, email, action, survey)', size: 36 });
+    var who = el('select', {}, el('option', { value: 'all', text: 'Everything' }), el('option', { value: 'instructor', text: 'Instructor actions' }), el('option', { value: 'students', text: 'Students' }));
+    who.value = logWho;
+    var go = function () { logQuery = q.value; logWho = who.value; logRows = null; render(); loadLog(); };
+    q.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') go(); });
+    who.addEventListener('change', go);
+    card.appendChild(el('div', { class: 'row' }, q, who, button('Search', 'plain', go), button('Refresh', 'plain', go),
+      logRows && logRows.length ? button('Download CSV', 'plain', function () {
+        download('survey_log_' + cur + '_' + today() + '.csv', [['Time (New York)', 'Time (ISO)', 'Account', 'Action', 'Detail']]
+          .concat(logRows.map(function (r) { return [isoFull(r.time), r.time, r.actor, r.action, r.detail]; })));
+      }) : null));
+    card.appendChild(el('p', { class: 'muted', text: 'Newest first, up to 2000 rows. Students: the first answer to a survey ("start"), each submission, and each refused attempt with its reason. Instructors: every change (open, close, settings, roster, deleted answers) and refused actions, marked by "(instructor)" after the account.' }));
+    if (logRows === null) { card.appendChild(el('p', { class: 'muted', text: 'Loading...' })); return; }
+    if (!logRows.length) { card.appendChild(el('p', { class: 'muted', text: 'No entries.' })); return; }
+    var t = el('table', {}, el('tr', {}, el('th', { text: 'Time' }), el('th', { text: 'Account' }), el('th', { text: 'Action' }), el('th', { text: 'Detail' })));
+    logRows.forEach(function (r) {
+      t.appendChild(el('tr', {}, el('td', { text: isoFull(r.time) }), el('td', { text: r.actor }),
+        el('td', { text: r.action, style: /^refused/.test(r.action) ? 'color:var(--warn)' : '' }), el('td', { text: r.detail, style: 'white-space:normal' })));
+    });
+    card.appendChild(el('div', { class: 'scroll' }, t));
+  }
+
+  boot();
+</script>
+</body>
+</html>

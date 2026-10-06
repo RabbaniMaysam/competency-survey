@@ -1,0 +1,19 @@
+# Rosters and other student data never belong in this public repository
+*.csv
+*.xlsx
+
+# The NACE source PDF is copyrighted; the item text is in worker/src/items.js
+*.pdf
+
+# Local Worker state and local secrets
+.wrangler/
+.dev.vars
+
+# Database dumps (student data) are written outside the repository, to ..\backups\competency-survey;
+# this line guards against a script writing here by mistake.
+backup/data/
+
+node_modules/
+~$*
+Thumbs.db
+desktop.ini

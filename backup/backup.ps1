@@ -1,0 +1,45 @@
+# Daily backup of the competency survey database (classes, responses, log).
+# Writes a full SQL dump to backups\competency-survey\ in the tools folder that contains this repository
+# (F:\GDriveMay\Maysam\01_online_tools\backups\competency-survey), which lives in Google Drive and is never committed.
+# Restore one with:  npx wrangler d1 execute competency-survey --remote --file "<that folder>\<file>.sql"
+# Registered as a Windows scheduled task "competency-survey backup" (see backup/README.txt).
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+$out = Join-Path (Split-Path -Parent $root) 'backups\competency-survey'
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+$file = Join-Path $out ('competency-survey_' + (Get-Date -Format 'yyyy-MM-dd_HHmm') + '.sql')
+$log = Join-Path $out 'last_run.log'
+$flag = Join-Path $out 'BACKUP_FAILED.txt'
+Set-Location (Join-Path $root 'worker')
+Set-Content $log ('Backup started ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding utf8
+# The Cloudflare export fails now and then; try up to five times, 10 minutes apart.
+# Wrangler writes progress and errors to stderr. Under 'Stop' PowerShell 5.1 turns the first stderr
+# line into a terminating error, which would end the script before any retry; so relax it for the call.
+$ok = $false
+foreach ($try in 1..5) {
+  Add-Content $log ("`r`n--- attempt $try at " + (Get-Date -Format 'HH:mm:ss')) -Encoding utf8
+  if (Test-Path $file) { Remove-Item $file }
+  $ErrorActionPreference = 'Continue'
+  & npx --yes wrangler d1 export competency-survey --remote --output $file 2>&1 |
+    ForEach-Object { ("$_" -replace "\x1b\[[0-9;]*m", '') -replace 'https://\S+', '<download link removed>' } |
+    Add-Content $log -Encoding utf8
+  $ErrorActionPreference = 'Stop'
+  if ((Test-Path $file) -and (Get-Item $file).Length -ge 500) { $ok = $true; break }
+  if ($try -lt 5) { Start-Sleep -Seconds 600 }
+}
+if (-not $ok) {
+  Set-Content $flag ('The backup of ' + (Get-Date -Format 'yyyy-MM-dd') + ' failed five times; see last_run.log.') -Encoding utf8
+  throw "Export failed five times; see last_run.log"
+}
+if (Test-Path $flag) { Remove-Item $flag }
+Add-Content $log ('Saved ' + (Split-Path $file -Leaf) + ', ' + (Get-Item $file).Length + ' bytes') -Encoding utf8
+# Readable CSV copies of this dump in csv\ (export_csv.mjs). A failure here is logged; the dump is kept.
+$ErrorActionPreference = 'Continue'
+& node --no-warnings (Join-Path $PSScriptRoot 'export_csv.mjs') $file 2>&1 | ForEach-Object { "$_" } | Add-Content $log -Encoding utf8
+if ($LASTEXITCODE -ne 0) { Add-Content $log 'CSV export failed (the SQL dump is fine).' -Encoding utf8 }
+$ErrorActionPreference = 'Stop'
+# Keep the newest 90 dumps (one per day), plus the first dump of every month for good.
+# Name: competency-survey_YYYY-MM-DD_HHMM.sql, so the month is characters 18 to 24.
+$dumps = Get-ChildItem $out -Filter 'competency-survey_*.sql' | Sort-Object Name -Descending
+$monthly = $dumps | Group-Object { $_.Name.Substring(18, 7) } | ForEach-Object { ($_.Group | Sort-Object Name | Select-Object -First 1).FullName }
+$dumps | Select-Object -Skip 90 | Where-Object { $monthly -notcontains $_.FullName } | Remove-Item
