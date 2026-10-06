@@ -49,6 +49,10 @@
     /* competency cards alternate light tan and light gray; the answer buttons stay white (blue when chosen) */
     .card.compA { background: #f6efe6; border-color: #e2d3bf; }
     .card.compB { background: #eceef1; border-color: #d3d8de; }
+    /* the competency's name is a full-width banner across the top of its card: white on very dark brown or near black */
+    .card.compA > h2, .card.compB > h2 { margin: -16px -16px 12px; padding: 12px 16px; border-radius: 7px 7px 0 0; color: #fff; }
+    .card.compA > h2 { background: #4a3322; }
+    .card.compB > h2 { background: #1f2328; }
     /* one circle per item: blue when answered, red when missing after Submit; a click scrolls to the item */
     .dots { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
     .dot { position: relative; width: 11px; height: 11px; padding: 0; border-radius: 50%; border: 1.5px solid #9aa7b4; background: #fff; cursor: pointer; }
