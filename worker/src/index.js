@@ -13,6 +13,7 @@
 
 import { canonEmail } from './roster.js';
 import * as sv from './survey.js';
+import { report } from './report.js';
 import { COMPETENCIES, ITEMS, LEVELS } from './items.js';
 
 const CORS = {
@@ -228,7 +229,7 @@ async function studentCall(env, real, action, key, args) {
 
 // ---------------------------------------------------------------- instructor page
 
-const READS = { whoami: 1, get: 1, log: 1, export: 1 };
+const READS = { whoami: 1, get: 1, log: 1, export: 1, report: 1 };
 
 /** Every instructor action except reads is logged (actor "email (instructor)"); a refused one is logged with its reason. */
 async function adminCall(env, real, action, key, args) {
@@ -290,6 +291,9 @@ async function adminDo(env, real, who, action, key, args) {
     return { exportedAt: new Date(now).toISOString(), key: key, state: shownState(s), responses: await allRows(),
              log: (await env.DB.prepare('SELECT id, time, actor, action, detail FROM log WHERE class = ? ORDER BY id').bind(key).all()).results };
   }
+
+  // The statistics of the Report tab (worker/src/report.js).
+  if (action === 'report') return Object.assign(report(s, await allRows()), { generated: new Date(now).toISOString() });
 
   const logs = [];  // [action, detail] lines written after the change succeeds
   if (action === 'importRoster') {

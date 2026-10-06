@@ -38,8 +38,6 @@
     .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
     .pill.open { background: #dff3e4; color: var(--ok); }
     .pill.closed { background: #eceff2; color: var(--muted); }
-    .bar { display: inline-block; height: 10px; border-radius: 3px; background: #c9d9ec; vertical-align: middle; }
-    .bar.end { background: #7fa7d6; }
     button { font: inherit; padding: 4px 11px; border-radius: 6px; border: 1px solid var(--accent);
              background: var(--accent); color: #fff; cursor: pointer; }
     button.plain { background: #fff; color: var(--accent); }
@@ -72,6 +70,32 @@
     /* the bar beside the session code: full when a new code appears, empty when it changes (30 seconds) */
     .codebar { display: inline-block; width: 140px; height: 14px; margin-left: 16px; vertical-align: middle; border-radius: 7px; background: #e3e7ec; overflow: hidden; }
     .codebar div { height: 100%; background: var(--accent); border-radius: 7px; }
+    /* the Report tab: a title block, summary figures in boxes, figures with captions, and tables with group rows */
+    .report .rhead h2 { font-size: 20px; margin: 6px 0 2px; }
+    .report .rhead .sub { font-size: 16px; margin: 0 0 4px; }
+    .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 10px 0 16px; }
+    .fact { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #f8fafc; }
+    .fact b { display: block; font-size: 21px; font-weight: 700; white-space: nowrap; }
+    .fact span { color: var(--muted); font-size: 12px; }
+    .figure { margin: 12px 0 18px; break-inside: avoid; }
+    .figure svg { max-width: 100%; height: auto; display: block; }
+    .figure p { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+    .report h2.sec { margin-top: 20px; }
+    .report table { width: auto; }
+    .report tr.group td { font-weight: 700; padding-top: 12px; }
+    .report tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
+    .report td.lab { padding-left: 18px; }
+    /* "Save as PDF" prints the report alone */
+    @media print {
+      @page { margin: 16mm; }
+      body { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      main { max-width: none; padding: 0; }
+      body.printreport #app > :not(.report), .noprint { display: none !important; }
+      .card.report { border: 0; padding: 0; margin: 0; }
+      .scroll { overflow: visible; }
+      tr { break-inside: avoid; }
+      thead { display: table-header-group; }
+    }
   </style>
 </head>
 <body>
@@ -83,7 +107,7 @@
   var API = (window.SURVEY_API || '').replace(/\/+$/, '');
   var TOKEN_KEY = 'survey_admin_token';  // this tool's own key: other tools' pages share the origin and keep their own tokens
   var TZ = 'America/New_York';
-  var TABS = ['Overview', 'QR code', 'Responses', 'Results', 'Settings', 'Roster', 'Log'];
+  var TABS = ['Overview', 'QR code', 'Responses', 'Report', 'Settings', 'Roster', 'Log'];
   var token = '', me = '', classes = [], cur = '', D = null, tab = 'Overview';
   var flash = null, busy = false, timer = null, openRow = '';
   // survey_admin.html?qr=KEY is the QR screen of that class in its own tab (for the projector); see qrPage.
@@ -115,7 +139,7 @@
   }
 
   function setClass(key) {
-    cur = key || ''; D = null; settingsDraft = null; logRows = null; openRow = '';
+    cur = key || ''; D = null; settingsDraft = null; logRows = null; openRow = ''; reportData = null;
     try { sessionStorage.setItem('survey_admin_class', cur); } catch (e) {}
   }
 
@@ -161,7 +185,7 @@
   function run(action, args, okText) {
     busy = true; flash = null; render();
     call(action, args).then(function (d) {
-      busy = false; setD(d); flash = okText ? { ok: okText } : null;
+      busy = false; setD(d); flash = okText ? { ok: okText } : null; reportData = null;
       render();
       if (action === 'saveSettings') refreshClasses();
     }).catch(fail);
@@ -181,13 +205,14 @@
     }).catch(function (e) { if (!quiet) fail(e); });
   }
 
-  // The Overview, Responses, and Results tabs refresh every 30 seconds, so new submissions appear; the QR code tab
+  // The Overview, Responses, and Report tabs refresh every 30 seconds, so new submissions appear; the QR code tab
   // and the QR screen every 10 seconds, for their submission count.
   function poll() {
     clearTimeout(timer);
     var qr = qrMode || tab === 'QR code';
     timer = setTimeout(function () {
-      if ((qr || tab === 'Overview' || tab === 'Responses' || tab === 'Results') && cur && !document.hidden) loadClass(true);
+      if (cur && !document.hidden && (qr || tab === 'Overview' || tab === 'Responses')) loadClass(true);
+      if (cur && !document.hidden && tab === 'Report' && !busy) loadReport(true);
       poll();
     }, qr ? 10000 : 30000);
   }
@@ -337,13 +362,18 @@
 
   // ---------------------------------------------------------------- QR code and session code
 
-  /** Calls fn once the QR library is loaded (from cdnjs on first use). */
-  function withQr(fn) {
-    if (window.qrcode) { fn(); return; }
-    var sc = el('script', { src: 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
-      on: { load: fn, error: function () { flash = { err: 'The QR code library could not be loaded. Check the internet connection.' }; render(); } } });
+  // Libraries loaded from a CDN on first use: the QR code, the Excel file (SheetJS), and the Word file (docx).
+  var LIBS = { qrcode: 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
+               XLSX: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+               docx: 'https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.js' };
+  /** Calls fn once the library (a global of that name) is loaded. */
+  function withLib(name, fn) {
+    if (window[name]) { fn(); return; }
+    var sc = el('script', { src: LIBS[name],
+      on: { load: fn, error: function () { busy = false; flash = { err: 'The ' + name + ' library could not be loaded. Check the internet connection.' }; render(); } } });
     document.head.appendChild(sc);
   }
+  function withQr(fn) { withLib('qrcode', fn); }
   function qrPicture() {
     var qr = window.qrcode(0, 'M');
     qr.addData(studentLink()); qr.make();
@@ -478,13 +508,14 @@
     TABS.forEach(function (t) {
       tabs.appendChild(el('button', { class: 'tab' + (t === tab ? ' on' : ''), text: t, on: { click: function () {
         flash = null;
-        leaveSettings().then(function (go) { if (!go) return; tab = t; render(); poll(); if (t === 'Log' && logRows === null) loadLog(); });
+        leaveSettings().then(function (go) { if (!go) return; tab = t; if (t === 'Report') reportData = null; render(); poll(); if (t === 'Log' && logRows === null) loadLog(); });
       } } }));
     });
     app.appendChild(tabs);
     var card = el('div', { class: 'card' });
-    ({ Overview: overview, 'QR code': qrTab, Responses: responses, Results: results, Settings: settings, Roster: roster, Log: logTab })[tab](card);
+    ({ Overview: overview, 'QR code': qrTab, Responses: responses, Report: reportTab, Settings: settings, Roster: roster, Log: logTab })[tab](card);
     app.appendChild(card);
+    document.body.classList.toggle('printreport', tab === 'Report');
     window.scrollTo(0, keepScroll);
   }
 
@@ -622,49 +653,385 @@
     download('survey_' + cur + '_' + today() + '.csv', rows);
   }
 
-  // ---- Results: per item, the mean level of submitted answers of each round (N/A excluded)
-  function results(card) {
-    var S = D.state, onRoster = {};
-    S.roster.forEach(function (r) { onRoster[r.email] = true; });
-    var sub = {};
-    S.rounds.forEach(function (r) { sub[r.id] = responsesOf(r.id).filter(function (x) { return x.submitted && onRoster[x.email]; }); });
-    card.appendChild(el('p', { class: 'muted', text: 'Submitted surveys of students on the roster: ' + S.rounds.map(function (r) { return r.name.toLowerCase() + ' ' + sub[r.id].length; }).join(', ')
-      + '. Mean level from 1 (' + D.levels[0] + ') to 4 (' + D.levels[3] + '); N/A answers are left out of the mean and counted separately. "Both" is the change for students who submitted both surveys.' }));
-    var stat = function (list, id) {
-      var v = list.map(function (x) { return x.answers[id]; }).filter(function (a) { return a !== undefined; });
-      var nums = v.filter(function (a) { return a !== 'na'; }).map(Number);
-      return { n: nums.length, na: v.length - nums.length, mean: nums.length ? nums.reduce(function (a, b) { return a + b; }, 0) / nums.length : null };
-    };
-    var a = S.rounds[0], b = S.rounds[1];
-    var paired = sub[a.id].map(function (x) { return [x, sub[b.id].filter(function (y) { return y.email === x.email; })[0]]; }).filter(function (q) { return q[1]; });
-    var fmt = function (m) { return m === null ? '' : m.toFixed(2); };
-    var barOf = function (m, cls) { return m === null ? null : el('span', { class: 'bar' + cls, style: 'width:' + Math.round(m * 25) + 'px' }); };
-    var t = el('table', { style: 'width:auto' }, el('tr', {}, el('th', { text: 'Item' }),
-      el('th', { class: 'num', text: a.name }), el('th', { class: 'num', text: 'N (N/A)' }),
-      el('th', { class: 'num', text: b.name }), el('th', { class: 'num', text: 'N (N/A)' }), el('th', {}),
-      el('th', { class: 'num', text: 'Both: change' }), el('th', { class: 'num', text: 'N' })));
+  // ---------------------------------------------------------------- Report
+
+  // The Report tab shows the statistics the Worker computes (worker/src/report.js) for one survey round or for the
+  // change between the two. The report is built once as a list of blocks (title, summary figures, headings, text,
+  // figures, tables), which the page draws, "Save as PDF" prints, and the Word and Excel downloads convert.
+  var reportData = null, reportKey = '', reportLoading = false, reportView = 'start', reportNames = true, reportModelNow = null;
+
+  function loadReport(quiet) {
+    if (reportLoading) return;
+    var key = cur;
+    reportLoading = true;
+    call('report').then(function (d) {
+      reportLoading = false;
+      // A quiet refresh redraws only when the data changed.
+      var same = quiet && reportData && reportKey === key && JSON.stringify(Object.assign({}, d, { generated: '' })) === JSON.stringify(Object.assign({}, reportData, { generated: '' }));
+      reportData = d; reportKey = key;
+      if (!same && tab === 'Report') render();
+    }).catch(function (e) { reportLoading = false; if (!quiet) fail(e); });
+  }
+
+  function reportTab(card) {
+    card.classList.add('report');
+    if (!reportData || reportKey !== cur) {
+      card.appendChild(el('p', { class: 'muted', text: 'Loading...' }));
+      loadReport(false);
+      return;
+    }
+    var R = reportData;
+    var views = [{ id: 'start', label: R.rounds[0].name }, { id: 'end', label: R.rounds[1].name }, { id: 'both', label: 'Start vs end' }];
+    var bar = el('div', { class: 'row noprint' });
+    views.forEach(function (v) {
+      bar.appendChild(el('button', { class: 'tab' + (v.id === reportView ? ' on' : ''), text: v.label, disabled: busy, on: { click: function () { reportView = v.id; render(); } } }));
+    });
+    bar.appendChild(el('span', { class: 'muted', text: '·' }));
+    bar.appendChild(button('Save as PDF', 'plain', function () { window.print(); }));
+    bar.appendChild(button('Download Word', 'plain', reportWord));
+    bar.appendChild(button('Download Excel', 'plain', reportExcel));
+    var namesCb = el('input', { type: 'checkbox' }); namesCb.checked = reportNames;
+    namesCb.addEventListener('change', function () { reportNames = namesCb.checked; render(); });
+    bar.appendChild(el('label', {}, namesCb, 'students by name'));
+    card.appendChild(bar);
+    card.appendChild(el('p', { class: 'muted noprint', text: 'The report of one survey counts every submitted survey of students on the roster; "Start vs end" compares the students who submitted both. '
+      + '"Save as PDF" prints this report (choose "Save as PDF" as the printer). Word has the same text, figures, and tables; Excel has the tables, plus every student\'s competency scores. '
+      + 'The students table (names and scores) is left out of all three when "students by name" is unchecked.' }));
+    reportModelNow = reportModel(R, reportView, reportNames);
+    card.appendChild(renderModel(reportModelNow));
+  }
+
+  // ---- number formats: a cell is a string, a number (two decimals), or {n, f} with f = int, signed, pct, or p
+  var sum = function (a, b) { return a + b; };
+  function f2(v) { return v === null || v === undefined ? '' : v.toFixed(2); }
+  function pct(v) { return v === null || v === undefined || isNaN(v) ? '' : Math.round(v * 100) + '%'; }
+  function signed(v) { return v === null || v === undefined ? '' : (v > 0 ? '+' : '') + v.toFixed(2); }
+  function pText(p) { return p === null || p === undefined ? '' : p < 0.001 ? '<0.001' : p.toFixed(3); }
+  var int = function (n) { return { n: n, f: 'int' }; }, pc = function (v) { return { n: v, f: 'pct' }; }, sg = function (v) { return { n: v, f: 'signed' }; }, pv = function (v) { return { n: v, f: 'p' }; };
+  function cellText(c) {
+    if (c === null || c === undefined) return '';
+    if (typeof c === 'number') return f2(c);
+    if (typeof c !== 'object') return String(c);
+    return c.n === null || c.n === undefined ? '' : c.f === 'int' ? String(c.n) : c.f === 'pct' ? pct(c.n) : c.f === 'signed' ? signed(c.n) : pText(c.n);
+  }
+  /** The same cell for Excel: numbers stay numbers, with a number format. */
+  function cellRaw(c) {
+    if (c === null || c === undefined) return '';
+    if (typeof c === 'number') return { t: 'n', v: c, z: '0.00' };
+    if (typeof c !== 'object') return String(c);
+    if (c.n === null || c.n === undefined) return '';
+    return { t: 'n', v: c.n, z: c.f === 'int' ? '0' : c.f === 'pct' ? '0%' : c.f === 'signed' ? '+0.00;-0.00;0.00' : '0.000' };
+  }
+  function dateOf(iso) { return iso ? new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(iso)) : ''; }
+
+  // ---- figures: SVG drawn here (no library), 720 px wide, so they print and convert to PNG for Word
+  var NS = 'http://www.w3.org/2000/svg';
+  function sv(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (k === 'text') e.textContent = attrs[k]; else e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i]) e.appendChild(arguments[i]);
+    return e;
+  }
+  var CH = { w: 720, label: 250, right: 64, row: 22, group: 28, font: 12 };
+  var LEVEL_COLORS = ['#d3e2f4', '#93b9e5', '#4d88d0', '#0b5cad'], NA_COLOR = '#c9ced4', START_COLOR = '#9fbfe6', END_COLOR = '#0b5cad';
+  var UP_COLOR = '#2e9e4f', SAME_COLOR = '#d5d9de', DOWN_COLOR = '#c9372c';
+  function darkFill(hex) { var n = parseInt(hex.slice(1), 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) < 150; }
+
+  /** The frame of a horizontal chart: white background, legend, one row per entry (group rows as bold headings), row labels. */
+  function chartFrame(rows, legend) {
+    var top = 10 + (legend ? 24 : 0), y = top, ys = [];
+    rows.forEach(function (r) { if (r.group) { y += 6; ys.push(y + CH.group - 8); y += CH.group; } else { ys.push(y + CH.row / 2); y += CH.row; } });
+    var h = y + 26;
+    var svg = sv('svg', { xmlns: NS, width: CH.w, height: h, viewBox: '0 0 ' + CH.w + ' ' + h, 'font-family': 'Arial, Helvetica, sans-serif', 'font-size': CH.font, fill: '#1f2328' });
+    svg.appendChild(sv('rect', { x: 0, y: 0, width: CH.w, height: h, fill: '#fff' }));
+    var lx = 0;
+    (legend || []).forEach(function (g) {
+      svg.appendChild(g.dot ? sv('circle', { cx: lx + 6, cy: 12, r: 5.5, fill: g.color }) : sv('rect', { x: lx, y: 6, width: 12, height: 12, fill: g.color }));
+      svg.appendChild(sv('text', { x: lx + 17, y: 16, text: g.label }));
+      lx += 17 + g.label.length * 6.4 + 16;
+    });
+    var grouped = rows.some(function (r) { return r.group; });
+    rows.forEach(function (r, k) {
+      var label = r.group || r.label;
+      if (label.length > 42) label = label.slice(0, 41) + '…';
+      svg.appendChild(sv('text', { x: r.group || !grouped ? 0 : 14, y: ys[k] + 4, text: label, 'font-weight': r.group || r.bold ? 'bold' : 'normal' }));
+    });
+    return { svg: svg, ys: ys, top: top, axisY: y, x0: CH.label, x1: CH.w - CH.right };
+  }
+  /** Grid lines and tick labels; returns the x of a value. ticks: [{v, label}] over [lo, hi]. */
+  function axis(f, lo, hi, ticks) {
+    var x = function (v) { return f.x0 + (v - lo) / (hi - lo) * (f.x1 - f.x0); };
+    ticks.forEach(function (t) {
+      f.svg.appendChild(sv('line', { x1: x(t.v), x2: x(t.v), y1: f.top, y2: f.axisY, stroke: '#e3e7ec' }));
+      f.svg.appendChild(sv('text', { x: x(t.v), y: f.axisY + 16, text: t.label, 'text-anchor': 'middle', fill: '#5c6670', 'font-size': 11 }));
+    });
+    return x;
+  }
+  var LEVEL_TICKS = [1, 2, 3, 4].map(function (v) { return { v: v, label: String(v) }; });
+  var PCT_TICKS = [0, 0.25, 0.5, 0.75, 1].map(function (v) { return { v: v, label: Math.round(v * 100) + '%' }; });
+
+  /** Horizontal bars of means on the 1 to 4 scale. rows: [{label, value, group, bold}]. */
+  function barChart(rows, color) {
+    var f = chartFrame(rows, null), x = axis(f, 1, 4, LEVEL_TICKS);
+    rows.forEach(function (r, k) {
+      if (r.group || r.value === null || r.value === undefined) return;
+      f.svg.appendChild(sv('rect', { x: x(1), y: f.ys[k] - 8, width: Math.max(0, x(r.value) - x(1)), height: 16, fill: color, rx: 2 }));
+      f.svg.appendChild(sv('text', { x: x(r.value) + 6, y: f.ys[k] + 4, text: r.value.toFixed(2) }));
+    });
+    return f.svg;
+  }
+  /** Start and end means as two dots joined by a line, with the change at the right. rows: [{label, a, b, group, bold}]. */
+  function dumbbellChart(rows, names) {
+    var f = chartFrame(rows, [{ label: names[0], color: START_COLOR, dot: true }, { label: names[1], color: END_COLOR, dot: true }]), x = axis(f, 1, 4, LEVEL_TICKS);
+    rows.forEach(function (r, k) {
+      if (r.group || r.a === null || r.a === undefined || r.b === null || r.b === undefined) return;
+      var y = f.ys[k], d = r.b - r.a;
+      f.svg.appendChild(sv('line', { x1: x(r.a), x2: x(r.b), y1: y, y2: y, stroke: '#8a94a0', 'stroke-width': 3 }));
+      f.svg.appendChild(sv('circle', { cx: x(r.a), cy: y, r: 5.5, fill: START_COLOR, stroke: '#fff', 'stroke-width': 1 }));
+      f.svg.appendChild(sv('circle', { cx: x(r.b), cy: y, r: 5.5, fill: END_COLOR }));
+      f.svg.appendChild(sv('text', { x: f.x1 + 10, y: y + 4, text: signed(d), 'font-weight': 'bold', fill: d > 0.005 ? UP_COLOR : d < -0.005 ? DOWN_COLOR : '#5c6670' }));
+    });
+    return f.svg;
+  }
+  /** 100% stacked bars. rows: [{label, parts: [counts], group}]; one color and legend label per part. */
+  function stackChart(rows, colors, labels) {
+    var f = chartFrame(rows, labels.map(function (l, i) { return { label: l, color: colors[i] }; })), x = axis(f, 0, 1, PCT_TICKS);
+    rows.forEach(function (r, k) {
+      if (r.group) return;
+      var total = r.parts.reduce(sum, 0), acc = 0;
+      if (!total) return;
+      r.parts.forEach(function (p, i) {
+        if (!p) return;
+        var left = x(acc / total), w = (f.x1 - f.x0) * p / total;
+        f.svg.appendChild(sv('rect', { x: left, y: f.ys[k] - 8, width: w, height: 16, fill: colors[i] }));
+        if (w > 28) f.svg.appendChild(sv('text', { x: left + w / 2, y: f.ys[k] + 4, text: Math.round(100 * p / total) + '%', 'text-anchor': 'middle', 'font-size': 10, fill: darkFill(colors[i]) ? '#fff' : '#1f2328' }));
+        acc += p;
+      });
+      f.svg.appendChild(sv('text', { x: f.x1 + 10, y: f.ys[k] + 4, text: 'n = ' + total, fill: '#5c6670', 'font-size': 11 }));
+    });
+    return f.svg;
+  }
+  /** Chart rows of the items, with a group row before each competency. */
+  function itemRows(items, f) {
+    var rows = [], last = '';
+    items.forEach(function (i) { if (i.compName !== last) { last = i.compName; rows.push({ group: last }); } rows.push(f(i)); });
+    return rows;
+  }
+
+  // ---- the report as blocks
+  function reportModel(R, view, names) {
+    var a = R.rounds[0], b = R.rounds[1];
+    var sub = view === 'both' ? 'Change from the start to the end of the semester' : (view === 'start' ? a : b).name + ' survey';
+    var when = function (r) { return r.openedAt ? r.name + ' survey: opened ' + dateOf(r.openedAt) + (r.closedAt ? ', closed ' + dateOf(r.closedAt) : ', open') + '.' : r.name + ' survey: not opened yet.'; };
+    var blocks = [{ t: 'head', title: R.title, sub: sub, meta: 'Report generated ' + isoFull(R.generated) + '. ' + when(a) + ' ' + when(b) }];
+    blocks = blocks.concat(view === 'both' ? bothBlocks(R, names) : roundBlocks(R, view, names));
+    var outside = R.rounds.filter(function (r) { return r.outside; });
+    blocks.push({ t: 'h2', text: 'Notes' });
+    blocks.push({ t: 'p', muted: true, text: 'Levels: ' + R.levels.map(function (l, k) { return (k + 1) + ' ' + l; }).join(', ') + '. N/A answers are counted but left out of every mean. '
+      + 'A student\'s competency score is the mean of the student\'s non-N/A answers to the competency\'s items, and the student\'s overall score the mean of all the student\'s non-N/A answers; '
+      + 'competency and overall means average the students\' scores, item means average the answers. '
+      + '"Start vs end" uses the students who submitted both surveys (for an item, those who answered it at a level in both); p is the two-sided p-value of a paired t-test of the mean change, blank with fewer than two students or no variation. '
+      + 'Only submitted surveys of students on the roster count'
+      + (outside.length ? '; submitted surveys of students no longer on the roster are left out (' + outside.map(function (r) { return r.name.toLowerCase() + ' ' + r.outside; }).join(', ') + ')' : '') + '.' });
+    if (names) blocks.push(scoresSheet(R));
+    return { title: R.title, sub: sub, file: 'survey_report_' + cur + '_' + view + '_' + today(), blocks: blocks };
+  }
+
+  function roundBlocks(R, id, names) {
+    var r = R.rounds.filter(function (x) { return x.id === id; })[0], o = R.overall[id], comps = R.competencies, items = R.items;
+    if (!r.submitted) return [{ t: 'p', text: 'No submitted ' + r.name.toLowerCase() + ' survey yet' + (r.started ? ' (' + r.started + ' started, not submitted).' : '.') }];
+    var answers = o.dist.reduce(sum, 0), levelNames = R.levels.map(function (l, k) { return (k + 1) + ' ' + l; });
+    var blocks = [{ t: 'facts', items: [
+      { v: r.submitted + ' of ' + r.roster, l: 'students submitted (' + pct(r.submitted / r.roster) + ')' },
+      { v: String(r.started), l: 'started, not submitted' },
+      { v: f2(o.mean), l: 'mean level (1 to 4)' },
+      { v: pct(o.applying), l: 'answers at level 3 or 4' },
+      { v: pct(o.na / answers), l: 'N/A answers' }] }];
+    blocks.push({ t: 'h2', text: 'Competencies' });
+    blocks.push({ t: 'figure', svg: barChart([{ label: 'All competencies', value: o.mean, bold: true }].concat(comps.map(function (c) { return { label: c.name, value: c[id].mean }; })), END_COLOR),
+      caption: 'Mean level by competency, from 1 (' + R.levels[0] + ') to 4 (' + R.levels[3] + '), over the ' + r.submitted + ' students who submitted.' });
+    blocks.push({ t: 'table', sheet: 'Competencies', head: ['Competency', 'Mean', 'SD', 'Students', 'At level 3 or 4', 'N/A answers'], num: [1, 2, 3, 4, 5], group: -1, total: true,
+      rows: comps.map(function (c) { return [c.name, c[id].mean, c[id].sd, int(c[id].n), pc(c[id].applying), int(c[id].na)]; })
+        .concat([['All competencies', o.mean, o.sd, int(o.n), pc(o.applying), int(o.na)]]) });
+    blocks.push({ t: 'h2', text: 'Items' });
+    blocks.push({ t: 'figure', svg: stackChart(itemRows(items, function (i) { return { label: i.name, parts: i[id].dist }; }), LEVEL_COLORS.concat([NA_COLOR]), levelNames.concat(['N/A'])),
+      caption: 'Share of the answers at each level, by item (n = answers, N/A included).' });
+    blocks.push({ t: 'table', sheet: 'Items', head: ['Competency', 'Item', 'Mean', 'SD', 'Answers at a level', 'Level 1', 'Level 2', 'Level 3', 'Level 4', 'N/A'], num: [2, 3, 4, 5, 6, 7, 8, 9], group: 0,
+      rows: items.map(function (i) { return [i.compName, i.name, i[id].mean, i[id].sd, int(i[id].n)].concat(i[id].dist.map(int)); }) });
+    if (names) {
+      blocks.push({ t: 'h2', text: 'Students' });
+      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', 'Mean level', 'N/A answers', 'Submitted'], num: [2, 3], group: -1,
+        rows: R.students.filter(function (x) { return x[id]; }).map(function (x) { return [x.last + ', ' + x.first, x.email, x[id].overall, int(x[id].na), isoClock(x[id].submitted)]; }) });
+    }
+    return blocks;
+  }
+
+  function bothBlocks(R, names) {
+    var a = R.rounds[0], b = R.rounds[1], o = R.overall.change, P = R.pairs, comps = R.competencies, items = R.items;
+    if (!P.both) return [{ t: 'p', text: 'No student has submitted both surveys yet (' + a.name.toLowerCase() + ': ' + a.submitted + ' submitted; ' + b.name.toLowerCase() + ': ' + b.submitted + ').' }];
+    var changeRow = function (name, c) { return [name, c.before, c.after, sg(c.mean), c.sd, int(c.n), pv(c.p), int(c.up), int(c.same), int(c.down)]; };
+    var blocks = [{ t: 'facts', items: [
+      { v: P.both + ' of ' + a.roster, l: 'students submitted both surveys' },
+      { v: P.startOnly + ' / ' + P.endOnly, l: 'submitted the start only / the end only' },
+      { v: f2(o.before) + ' → ' + f2(o.after), l: 'mean level, start → end' },
+      { v: signed(o.mean), l: 'mean change' + (o.p !== null ? ' (p ' + (o.p < 0.001 ? '< 0.001' : '= ' + pText(o.p)) + ')' : '') },
+      { v: pct(o.up / o.n), l: 'students whose mean level rose' }] }];
+    blocks.push({ t: 'h2', text: 'Competencies' });
+    blocks.push({ t: 'figure', svg: dumbbellChart([{ label: 'All competencies', a: o.before, b: o.after, bold: true }].concat(comps.map(function (c) { return { label: c.name, a: c.change.before, b: c.change.after }; })), [a.name, b.name]),
+      caption: 'Mean level at the start and at the end of the semester, by competency, for the ' + P.both + ' students who submitted both surveys, and the mean change.' });
+    blocks.push({ t: 'table', sheet: 'Competencies', head: ['Competency', a.name, b.name, 'Change', 'SD of change', 'Students', 'p', 'Rose', 'Same', 'Fell'], num: [1, 2, 3, 4, 5, 6, 7, 8, 9], group: -1, total: true,
+      rows: comps.map(function (c) { return changeRow(c.name, c.change); }).concat([changeRow('All competencies', o)]) });
+    blocks.push({ t: 'figure', svg: stackChart([{ label: 'All competencies', parts: [o.up, o.same, o.down], bold: true }].concat(comps.map(function (c) { return { label: c.name, parts: [c.change.up, c.change.same, c.change.down] }; })), [UP_COLOR, SAME_COLOR, DOWN_COLOR], ['Rose', 'Same', 'Fell']),
+      caption: 'Share of students whose competency score rose, stayed the same, or fell between the two surveys.' });
+    blocks.push({ t: 'h2', text: 'Items' });
+    blocks.push({ t: 'figure', svg: dumbbellChart(itemRows(items, function (i) { return { label: i.name, a: i.change.before, b: i.change.after }; }), [a.name, b.name]),
+      caption: 'Mean level at the start and at the end of the semester, by item, for the students who answered the item at a level in both surveys.' });
+    blocks.push({ t: 'table', sheet: 'Items', head: ['Competency', 'Item', a.name, b.name, 'Change', 'SD of change', 'Students', 'p', 'Rose', 'Same', 'Fell'], num: [2, 3, 4, 5, 6, 7, 8, 9, 10], group: 0,
+      rows: items.map(function (i) { return [i.compName].concat(changeRow(i.name, i.change)); }) });
+    if (names) {
+      blocks.push({ t: 'h2', text: 'Students' });
+      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', a.name, b.name, 'Change', 'N/A answers (start / end)'], num: [2, 3, 4, 5], group: -1,
+        rows: R.students.map(function (x) { return [x.last + ', ' + x.first, x.email, x.start ? x.start.overall : null, x.end ? x.end.overall : null, sg(x.change),
+          (x.start ? x.start.na : '-') + ' / ' + (x.end ? x.end.na : '-')]; }) });
+    }
+    return blocks;
+  }
+
+  /** For Excel only: one row per student and survey with the overall and every competency score. */
+  function scoresSheet(R) {
     var rows = [];
-    D.competencies.filter(function (c) { return isOn(c.code); }).forEach(function (c) {
-      t.appendChild(el('tr', {}, el('td', { colspan: 8, style: 'font-weight:700; padding-top:12px', text: c.name })));
-      c.dims.forEach(function (d) {
-        var id = c.code + '.' + d.code, s1 = stat(sub[a.id], id), s2 = stat(sub[b.id], id);
-        var diffs = paired.map(function (q) { return [q[0].answers[id], q[1].answers[id]]; })
-          .filter(function (v) { return v[0] !== undefined && v[1] !== undefined && v[0] !== 'na' && v[1] !== 'na'; })
-          .map(function (v) { return Number(v[1]) - Number(v[0]); });
-        var ch = diffs.length ? diffs.reduce(function (x, y) { return x + y; }, 0) / diffs.length : null;
-        rows.push([c.name, d.name, fmt(s1.mean), s1.n, s1.na, fmt(s2.mean), s2.n, s2.na, ch === null ? '' : ch.toFixed(2), diffs.length]);
-        t.appendChild(el('tr', {}, el('td', { style: 'padding-left:18px', text: d.name }),
-          el('td', { class: 'num', text: fmt(s1.mean) }), el('td', { class: 'num muted', text: s1.n + ' (' + s1.na + ')' }),
-          el('td', { class: 'num', text: fmt(s2.mean) }), el('td', { class: 'num muted', text: s2.n + ' (' + s2.na + ')' }),
-          el('td', {}, barOf(s1.mean, ''), el('br'), barOf(s2.mean, ' end')),
-          el('td', { class: 'num', text: ch === null ? '' : (ch > 0 ? '+' : '') + ch.toFixed(2) }), el('td', { class: 'num muted', text: String(diffs.length) })));
+    R.students.forEach(function (x) {
+      R.rounds.forEach(function (r) {
+        if (!x[r.id]) return;
+        rows.push([x.last, x.first, x.email, r.name, isoFull(x[r.id].submitted), x[r.id].overall, int(x[r.id].na)].concat(R.competencies.map(function (c) { return x[r.id].comps[c.code]; })));
       });
     });
-    card.appendChild(el('div', { class: 'row' }, button('Download CSV', 'plain', function () {
-      download('survey_results_' + cur + '_' + today() + '.csv', [['Competency', 'Item', a.name + ' mean', a.name + ' N', a.name + ' N/A',
-        b.name + ' mean', b.name + ' N', b.name + ' N/A', 'Change (students with both)', 'Students with both']].concat(rows));
-    }), el('span', { class: 'muted' }, el('span', { class: 'bar', style: 'width:20px' }), ' ' + a.name.toLowerCase() + '  ', el('span', { class: 'bar end', style: 'width:20px' }), ' ' + b.name.toLowerCase())));
-    card.appendChild(el('div', { class: 'scroll' }, t));
+    return { t: 'table', xlsxOnly: true, sheet: 'Student scores', head: ['Last name', 'First name', 'Email', 'Survey', 'Submitted', 'Mean level', 'N/A answers'].concat(R.competencies.map(function (c) { return c.name; })),
+             num: [5, 6].concat(R.competencies.map(function (c, k) { return 7 + k; })), group: -1, rows: rows };
+  }
+
+  // ---- the blocks on the page
+  function renderModel(m) {
+    var box = el('div');
+    m.blocks.forEach(function (b) {
+      if (b.xlsxOnly) return;
+      if (b.t === 'head') box.appendChild(el('div', { class: 'rhead' }, el('h2', { text: b.title }), el('p', { class: 'sub', text: b.sub }), el('p', { class: 'muted', text: b.meta })));
+      else if (b.t === 'facts') { var g = el('div', { class: 'facts' }); b.items.forEach(function (i) { g.appendChild(el('div', { class: 'fact' }, el('b', { text: i.v }), el('span', { text: i.l }))); }); box.appendChild(g); }
+      else if (b.t === 'h2') box.appendChild(el('h2', { class: 'sec', text: b.text }));
+      else if (b.t === 'p') box.appendChild(el('p', { class: b.muted ? 'muted' : '', text: b.text }));
+      else if (b.t === 'figure') box.appendChild(el('div', { class: 'figure' }, b.svg, el('p', { text: b.caption })));
+      else if (b.t === 'table') box.appendChild(el('div', { class: 'scroll' }, domTable(b)));
+    });
+    return box;
+  }
+  function isNum(b, k) { return b.num.indexOf(k) !== -1; }
+  function domTable(b) {
+    var head = el('tr'), body = el('tbody'), last = null, cols = b.head.length - (b.group >= 0 ? 1 : 0);
+    b.head.forEach(function (h, k) { if (k !== b.group) head.appendChild(el('th', { class: isNum(b, k) ? 'num' : '', text: h })); });
+    b.rows.forEach(function (r, ri) {
+      if (b.group >= 0 && r[b.group] !== last) { last = r[b.group]; body.appendChild(el('tr', { class: 'group' }, el('td', { colspan: cols, text: last }))); }
+      var tr = el('tr', { class: b.total && ri === b.rows.length - 1 ? 'total' : '' });
+      r.forEach(function (c, k) { if (k !== b.group) tr.appendChild(el('td', { class: (isNum(b, k) ? 'num' : '') + (b.group >= 0 && k === b.group + 1 ? ' lab' : ''), text: cellText(c) })); });
+      body.appendChild(tr);
+    });
+    return el('table', {}, el('thead', {}, head), body);
+  }
+
+  // ---- downloads
+  function saveBlob(name, blob) {
+    var link = el('a', { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(link); link.click(); link.remove();
+  }
+
+  /** The Excel file: a Summary sheet, then one sheet per table. */
+  function reportExcel() {
+    var m = reportModelNow;
+    if (!m) return;
+    busy = true; flash = null; render();
+    withLib('XLSX', function () {
+      var X = window.XLSX, wb = X.utils.book_new();
+      var summary = [[m.title], [m.sub], []];
+      m.blocks.forEach(function (b) {
+        if (b.t === 'head') summary.push([b.meta]);
+        if (b.t === 'facts') b.items.forEach(function (i) { summary.push([i.l, i.v]); });
+        if (b.t === 'p') summary.push([b.text]);
+      });
+      X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(summary), 'Summary');
+      m.blocks.filter(function (b) { return b.t === 'table'; }).forEach(function (b) {
+        var ws = X.utils.aoa_to_sheet([b.head].concat(b.rows.map(function (r) { return r.map(cellRaw); })));
+        ws['!cols'] = b.head.map(function (h, k) { return { wch: Math.min(44, Math.max(h.length, 6, b.rows.reduce(function (w, r) { return Math.max(w, cellText(r[k]).length); }, 0)) + 2) }; });
+        X.utils.book_append_sheet(wb, ws, b.sheet);
+      });
+      X.writeFile(wb, m.file + '.xlsx');
+      busy = false; flash = { ok: 'Excel file downloaded.' }; render();
+    });
+  }
+
+  /** A figure as PNG bytes (the SVG drawn on a canvas at twice its size). */
+  function svgToPng(svg) {
+    return new Promise(function (resolve, reject) {
+      var w = Number(svg.getAttribute('width')), h = Number(svg.getAttribute('height')), img = new Image();
+      img.onload = function () {
+        var c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2;
+        var ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(function (blob) { blob.arrayBuffer().then(function (buf) { resolve({ data: new Uint8Array(buf), w: w, h: h }); }); }, 'image/png');
+      };
+      img.onerror = function () { reject(new Error('A figure could not be drawn.')); };
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+    });
+  }
+
+  /** The Word file: the same blocks, figures as pictures. */
+  function reportWord() {
+    var m = reportModelNow;
+    if (!m) return;
+    busy = true; flash = null; render();
+    withLib('docx', function () {
+      var d = window.docx;
+      var figs = m.blocks.filter(function (b) { return b.t === 'figure'; });
+      Promise.all(figs.map(function (b) { return svgToPng(b.svg); })).then(function (pngs) {
+        var kids = [], fi = 0;
+        var para = function (text, opts) { return new d.Paragraph(Object.assign({ children: [new d.TextRun({ text: text })], spacing: { after: 120 } }, opts || {})); };
+        m.blocks.forEach(function (b) {
+          if (b.xlsxOnly) return;
+          if (b.t === 'head') {
+            kids.push(new d.Paragraph({ text: b.title, heading: d.HeadingLevel.TITLE }));
+            kids.push(new d.Paragraph({ text: b.sub, heading: d.HeadingLevel.HEADING_1 }));
+            kids.push(para(b.meta, { spacing: { after: 240 } }));
+          } else if (b.t === 'facts') {
+            b.items.forEach(function (i) { kids.push(new d.Paragraph({ children: [new d.TextRun({ text: i.v, bold: true }), new d.TextRun({ text: '  ' + i.l })], spacing: { after: 60 } })); });
+            kids.push(para(''));
+          } else if (b.t === 'h2') kids.push(new d.Paragraph({ text: b.text, heading: d.HeadingLevel.HEADING_2 }));
+          else if (b.t === 'p') kids.push(para(b.text));
+          else if (b.t === 'figure') {
+            var png = pngs[fi++], w = 620;
+            kids.push(new d.Paragraph({ children: [new d.ImageRun({ type: 'png', data: png.data, transformation: { width: w, height: Math.round(png.h * w / png.w) } })], spacing: { before: 120 } }));
+            kids.push(new d.Paragraph({ children: [new d.TextRun({ text: b.caption, italics: true, size: 18 })], spacing: { after: 240 } }));
+          } else if (b.t === 'table') { kids.push(docxTable(d, b)); kids.push(para('')); }
+        });
+        var doc = new d.Document({ creator: 'Competency survey', title: m.title + ': ' + m.sub,
+          styles: { default: { document: { run: { font: 'Calibri', size: 21 } } } },
+          sections: [{ properties: { page: { margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 } } }, children: kids }] });
+        return d.Packer.toBlob(doc);
+      }).then(function (blob) {
+        saveBlob(m.file + '.docx', blob);
+        busy = false; flash = { ok: 'Word file downloaded.' }; render();
+      }).catch(fail);
+    });
+  }
+  function docxTable(d, b) {
+    var keep = b.head.map(function (h, k) { return k; }).filter(function (k) { return k !== b.group; });
+    var cell = function (text, o) {
+      return new d.TableCell({ columnSpan: o.span, margins: { top: 40, bottom: 40, left: 80, right: 80 },
+        children: [new d.Paragraph({ alignment: o.right ? d.AlignmentType.RIGHT : d.AlignmentType.LEFT, children: [new d.TextRun({ text: text, bold: !!o.bold, size: 17 })] })] });
+    };
+    var rows = [new d.TableRow({ tableHeader: true, children: keep.map(function (k) { return cell(b.head[k], { bold: true, right: isNum(b, k) }); }) })], last = null;
+    b.rows.forEach(function (r, ri) {
+      if (b.group >= 0 && r[b.group] !== last) { last = r[b.group]; rows.push(new d.TableRow({ children: [cell(last, { bold: true, span: keep.length })] })); }
+      var bold = b.total && ri === b.rows.length - 1;
+      rows.push(new d.TableRow({ children: keep.map(function (k) { return cell((b.group >= 0 && k === b.group + 1 ? '   ' : '') + cellText(r[k]), { bold: bold, right: isNum(b, k) }); }) }));
+    });
+    return new d.Table({ width: { size: 100, type: d.WidthType.PERCENTAGE }, rows: rows });
   }
 
   // ---- Settings: title, which competencies the survey includes, full download, delete

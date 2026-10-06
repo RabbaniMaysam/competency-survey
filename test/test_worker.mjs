@@ -144,6 +144,14 @@ ok(row1.answers['equity.practices'] === 2 && Object.keys(row1.answers).length ==
 ok(/at least one/i.test((await adm('saveSettings', [{ off: r.data.competencies.map(c => c.code) }])).error), 'turning every competency off refused');
 ok(/Unknown competency/.test((await adm('saveSettings', [{ off: ['nope'] }])).error), 'unknown competency refused');
 
+// the report: student 1 submitted the start round (its first item N/A), student 2 started it
+r = await adm('report');
+ok(r.ok && r.data.title === 'Survey test 2' && r.data.generated && r.data.rounds[0].submitted === 1 && r.data.rounds[0].started === 1 && r.data.rounds[1].submitted === 0
+  && r.data.items.length === 22 && r.data.competencies.length === 7 && r.data.pairs.both === 0, 'report: counts of the start round, equity left out');
+ok(r.data.items[0].start.na === 1 && r.data.items[0].start.n === 0 && r.data.items[1].start.mean === 2 && r.data.overall.start.n === 1 && r.data.students.length === 1
+  && r.data.students[0].email === m(1) && r.data.students[0].start.na === 1 && r.data.students[0].end === null, 'report: item statistics and the student\'s scores');
+ok((await adm('log', ['', 'all', 50])).data.rows.every(x => x.action !== 'report'), 'the report is a read: not logged');
+
 // closing time and closing
 r = await adm('setCloses', ['start', new Date(Date.now() + 3600000).toISOString()]);
 ok(r.ok && r.data.state.rounds[0].closes && r.data.open.join() === 'start', 'closing time set');

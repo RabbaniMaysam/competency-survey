@@ -10,7 +10,7 @@ const PAGES = ['survey.html', 'survey_admin.html'];
 const BROWSER = ['window', 'document', 'location', 'history', 'navigator', 'fetch', 'sessionStorage', 'localStorage', 'setTimeout', 'clearTimeout',
   'setInterval', 'clearInterval', 'requestAnimationFrame', 'Intl', 'Promise', 'FileReader', 'Blob', 'URL', 'URLSearchParams', 'google', 'atob',
   'encodeURIComponent', 'decodeURIComponent', 'console', 'Date', 'JSON', 'Math', 'Number', 'String', 'Object', 'Array', 'Error', 'isNaN',
-  'alert', 'confirm', 'prompt'];
+  'alert', 'confirm', 'prompt', 'XMLSerializer', 'Image', 'Uint8Array', 'parseInt', 'XLSX', 'docx'];
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pagecheck-'));
 let bad = 0;
