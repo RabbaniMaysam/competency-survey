@@ -208,29 +208,29 @@ export const LEVELS_V2 = ['Not at all', 'A little', 'Somewhat', 'Mostly', 'Fully
  */
 export const COMPETENCIES_V2 = [
   { code: 'communication2', name: 'Communication', dims: [
-    { code: 'present', name: 'Present without notes', text: 'I can present to a class or a group clearly, without reading from my notes.' },
-    { code: 'memo', name: 'Write a clear memo', text: 'I can write a clear one-page memo or report that someone else can act on.' },
-    { code: 'summarize', name: 'Summarize before responding', text: 'In a discussion, I can summarize what someone else said before I respond.' }] },
+    { code: 'present', name: 'Present without notes', text: 'Presenting to a class or a group clearly, without reading from my notes.' },
+    { code: 'memo', name: 'Write a clear memo', text: 'Writing a clear one-page memo or report that someone else can act on.' },
+    { code: 'summarize', name: 'Summarize before responding', text: 'Summarizing what someone else said in a discussion before I respond.' }] },
   { code: 'teamwork2', name: 'Teamwork and leadership', dims: [
-    { code: 'share', name: 'Do my share on time', text: 'I do my share of group work on time, without being reminded.' },
-    { code: 'disagree', name: 'Settle disagreements', text: 'When my group disagrees, I can help us settle it without anyone checking out.' },
-    { code: 'plan', name: 'Set up a plan', text: 'When a group has no plan, I can set one up: tasks, owners, and deadlines.' }] },
+    { code: 'share', name: 'Do my share on time', text: 'Doing my share of group work on time, without being reminded.' },
+    { code: 'disagree', name: 'Settle disagreements', text: 'Helping my group settle a disagreement without anyone checking out.' },
+    { code: 'plan', name: 'Set up a plan', text: 'Setting up a plan for a group that has none: tasks, owners, and deadlines.' }] },
   { code: 'thinking2', name: 'Critical thinking and data', dims: [
-    { code: 'parts', name: 'Break a question into parts', text: 'Facing a messy question, I can break it into smaller parts I can answer.' },
-    { code: 'numbers', name: 'Use data to test a claim', text: 'I can use numbers or data to support or reject a claim.' },
-    { code: 'sources', name: 'Judge a source', text: 'I can judge whether a source, a statistic, or an AI answer is trustworthy.' }] },
+    { code: 'parts', name: 'Break a question into parts', text: 'Breaking a messy question into smaller parts I can answer.' },
+    { code: 'numbers', name: 'Use data to test a claim', text: 'Using numbers or data to support or reject a claim.' },
+    { code: 'sources', name: 'Judge a source', text: 'Judging whether a source, a statistic, or an AI answer is trustworthy.' }] },
   { code: 'technology2', name: 'Technology', dims: [
-    { code: 'software', name: 'Analyze data in software', text: 'I can use spreadsheet or statistical software (Excel, R, Stata) to analyze data.' },
-    { code: 'selfteach', name: 'Teach myself a tool', text: 'I can teach myself a new software tool from its documentation or videos.' },
-    { code: 'ai', name: 'Use AI openly', text: 'I can use AI tools for schoolwork in a way I could openly explain to a professor or employer.' }] },
+    { code: 'software', name: 'Analyze data in software', text: 'Using spreadsheet or statistical software (Excel, R, Stata) to analyze data.' },
+    { code: 'selfteach', name: 'Teach myself a tool', text: 'Teaching myself a new software tool from its documentation or videos.' },
+    { code: 'ai', name: 'Use AI openly', text: 'Using AI tools for schoolwork in a way I could openly explain to a professor or employer.' }] },
   { code: 'professionalism2', name: 'Professionalism', dims: [
-    { code: 'deadlines', name: 'Meet deadlines', text: 'I meet deadlines and commitments without last-minute excuses.' },
-    { code: 'check', name: 'Check my work', text: 'I check my work for errors before I submit it.' },
-    { code: 'email', name: 'Communicate professionally', text: 'I communicate with professors and employers professionally (email, meetings, follow-up).' }] },
+    { code: 'deadlines', name: 'Meet deadlines', text: 'Meeting deadlines and commitments without last-minute excuses.' },
+    { code: 'check', name: 'Check my work', text: 'Checking my work for errors before I submit it.' },
+    { code: 'email', name: 'Communicate professionally', text: 'Communicating with professors and employers professionally (email, meetings, follow-up).' }] },
   { code: 'career2', name: 'Career and self-development', dims: [
-    { code: 'strengths', name: 'Name my strengths and weaknesses', text: 'I can name my two strongest and two weakest skills for the job I want.' },
-    { code: 'requirements', name: 'Know what the job requires', text: 'I know what the job I want requires and what I still lack.' },
-    { code: 'outreach', name: 'Reach out to strangers', text: 'I reach out to people I do not know (alumni, professors, professionals) to learn about careers.' }] }
+    { code: 'strengths', name: 'Name my strengths and weaknesses', text: 'Naming my two strongest and two weakest skills for the job I want.' },
+    { code: 'requirements', name: 'Know what the job requires', text: 'Knowing what the job I want requires and what I still lack.' },
+    { code: 'outreach', name: 'Reach out to strangers', text: 'Reaching out to people I do not know (alumni, professors, professionals) to learn about careers.' }] }
 ];
 
 /** Every item of version 2 in survey order: {id, comp, compName, dim, dimName, text, version}. */
