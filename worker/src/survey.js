@@ -18,7 +18,7 @@ import { COMPETENCIES, VERSIONS, versionOf } from './items.js';
 
 export const ROUNDS = [{ id: 'start', name: 'Start of semester' }, { id: 'end', name: 'End of semester' }];
 export const DEFAULT_OFF = COMPETENCIES.filter(c => c.offByDefault).map(c => c.code);
-export const DEFAULT_VERSION = 1;
+export const DEFAULT_VERSION = 2;
 
 const iso = ms => new Date(ms).toISOString();
 const text = s => String(s ?? '').trim();
@@ -72,7 +72,7 @@ export function checkCode(s, code, nowMs) {
 export function upgrade(s) {
   if (!Array.isArray(s.roster)) s.roster = [];
   if (!Array.isArray(s.off)) s.off = DEFAULT_OFF.slice();
-  if (!VERSIONS.some(v => v.n === s.version)) s.version = DEFAULT_VERSION;  // classes made before version 2 existed use version 1
+  if (!VERSIONS.some(v => v.n === s.version)) s.version = DEFAULT_VERSION;  // a class without a stored version uses the default
   if (typeof s.code !== 'boolean') s.code = true;
   if (!(s.codeSec > 0)) s.codeSec = CODE_SEC_DEFAULT;
   if (!Array.isArray(s.rounds)) s.rounds = [];

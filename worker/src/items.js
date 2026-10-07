@@ -241,8 +241,8 @@ export const ITEMS_V2 = COMPETENCIES_V2.flatMap(c => c.dims.map(d => ({ id: c.co
 /**
  * The two versions of the survey. n: the version number (the class setting); title: the student page's
  * heading; levels: the scale (1 to levels.length); na: whether N/A is an answer; intro: the student page's
- * opening text per round, instruction: the sentence after it, prompt: the question beside the options
- * (version 2 only); summary: one line for the Settings tab.
+ * opening text per round, instruction: the sentence after it, prompt: the instruction in each block's heading,
+ * after the block's name (version 2 only); summary: one line for the Settings tab.
  */
 export const VERSIONS = [
   { n: 1, name: 'Version 1', title: 'Competency self-assessment', competencies: COMPETENCIES, items: ITEMS, levels: LEVELS, na: true, naText: NA_TEXT,
@@ -253,7 +253,7 @@ export const VERSIONS = [
       end: 'A few months ago you rated how confident you were in these skills. Rate them again, as you are today.'
     },
     instruction: 'For each statement below, think about class, group projects, a job or internship, a club, or anything else you have done.',
-    prompt: 'How confident are you that you can do this today?',
+    prompt: 'Rate your confidence in doing the following',
     summary: '18 one-sentence statements in 6 blocks, each rated on a five-point confidence scale (Not at all to Fully), no N/A.' }
 ];
 COMPETENCIES.forEach(c => { c.version = 1; });

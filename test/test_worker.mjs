@@ -65,8 +65,10 @@ ok(r.ok && r.data.key === K && (await (await fetch(API + '/config')).json()).cla
 ok(/exists/.test((await adm('createClass', [K, 'again'], '')).error), 'duplicate class key refused');
 ok(/lowercase/.test((await adm('createClass', ['Bad Key!', 'x'], '')).error), 'bad class key refused');
 r = await adm('get');
-ok(r.ok && r.data.state.off.join() === 'equity' && r.data.state.version === 1 && r.data.items.length === 43 && r.data.competencies.length === 14
-  && r.data.versions.length === 2 && r.data.versions[0].levels.length === 4 && r.data.versions[1].levels.length === 5 && r.data.open.length === 0, 'new class: version 1, equity off, nothing open; both versions\' items sent');
+ok(r.ok && r.data.state.off.join() === 'equity' && r.data.state.version === 2 && r.data.defaultVersion === 2 && r.data.items.length === 43 && r.data.competencies.length === 14
+  && r.data.versions.length === 2 && r.data.versions[0].levels.length === 4 && r.data.versions[1].levels.length === 5 && r.data.open.length === 0, 'new class: version 2, equity off, nothing open; both versions\' items sent');
+r = await adm('saveSettings', [{ version: '1' }]);  // the checks up to the version 2 section use version 1
+ok(r.ok && r.data.state.version === 1, 'version 1 chosen for the class');
 r = await adm('importRoster', ['first,last,email\nF1,L1,' + m(1) + '\nF2,L2,' + m(2) + '\nF3,L3,' + m(3)]);
 ok(r.ok && r.data.state.roster.length === 3, 'roster imported');
 r = await adm('previewRoster', ['first,last,email\nF1,L1,' + m(1) + '\nF2,L2,' + m(2)]);

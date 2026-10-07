@@ -31,6 +31,7 @@ ok(paired([]).n === 0 && paired([]).before === null, 'no pairs');
 
 // a class: 5 on the roster, equity off (22 items), start submitted by 4, end by 3 (2 of them in both), one dropped from the roster
 const s = sv.newClass('BUS 101', T0);
+sv.ADMIN.saveSettings(s, { version: '1' }, T0);
 sv.ADMIN.importRoster(s, 'first,last,email\nAmy,Zed,az@x.edu\nBo,Abe,bo@x.edu\nCy,Moe,cy@x.edu\nDi,Oak,di@x.edu\nEd,Pim,ed@x.edu');
 const items = sv.activeItems(s).map(i => i.id);
 const fill = (level, except) => { const o = {}; items.forEach(id => { o[id] = level; }); Object.assign(o, except || {}); return o; };

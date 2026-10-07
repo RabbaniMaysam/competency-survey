@@ -1256,7 +1256,7 @@
     card.appendChild(el('h2', { text: 'Survey version', style: 'margin-top:16px' }));
     card.appendChild(el('p', { class: 'muted', text: 'Which survey the students answer, in both rounds. Change it before opening a survey: it cannot change while a survey is open. Answers given to the other version are kept and listed on the Responses tab, but the report counts only the answers to the version in use.' }));
     verRadios.forEach(function (o) {
-      card.appendChild(el('label', { class: 'comp' }, o.rb, el('span', {}, el('b', { text: o.x.name + (o.x.n === 1 ? ' (default)' : '') }), el('br'), el('span', { class: 'muted', text: o.x.summary }))));
+      card.appendChild(el('label', { class: 'comp' }, o.rb, el('span', {}, el('b', { text: o.x.name + (o.x.n === (D.defaultVersion || 2) ? ' (default for a new class)' : '') }), el('br'), el('span', { class: 'muted', text: o.x.summary }))));
     });
     card.appendChild(el('label', { class: 'comp' }, codeCb, el('span', {}, el('b', { text: 'Students type the session code to start a survey' }), el('br'),
       el('span', { class: 'muted', text: 'The 4-digit code is shown with the QR code (QR code tab) and changes at the interval below, so a student starts the survey in the room. It is typed once per survey; after that the student can finish and change answers anywhere while the survey is open. A code is accepted for one to two intervals after it appears (the current code and the previous one); a wrong code can be retried. A longer interval is easier to type and easier to relay to someone outside the room.' }))));

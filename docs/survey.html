@@ -46,8 +46,9 @@
     /* version 2: the statement, then the question at the left of five big rounded buttons with the scale words inside */
     .stmt { font-size: 17px; font-weight: 600; margin: 16px 0 8px; }
     .scale { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-    .scale .q { flex: 0 0 150px; color: var(--muted); font-size: 14px; line-height: 1.3; }
     .scale .btns { flex: 1 1 340px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+    .card > h2.ask { font-weight: 400; }
+    .card > h2.ask b { font-weight: 700; }
     .big { padding: 14px 4px; border-radius: 14px; border: 2px solid var(--line); background: #fff; color: var(--ink); font: inherit;
            font-size: 15px; font-weight: 600; line-height: 1.2; text-align: center; cursor: pointer; box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
            transition: transform .08s, background .12s, border-color .12s; }
@@ -55,7 +56,6 @@
     .big:active { transform: translateY(0); }
     .big.on { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 2px 6px rgba(11, 92, 173, .35); }
     @media (max-width: 480px) {
-      .scale .q { flex-basis: 100%; }
       .scale .btns { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }
       .big { font-size: 14px; padding: 12px 4px; }
     }
@@ -393,16 +393,18 @@
     }
 
     S.competencies.forEach(function (c, ci) {
-      var card = el('div', { class: 'card ' + (ci % 2 ? 'compB' : 'compA') }, el('h2', { text: c.name }), c.definition ? el('p', { class: 'muted', text: c.definition }) : null);
+      // version 2: the heading is the block's name in bold, then the rating instruction in normal weight
+      var head = S.version === 2 && S.prompt ? el('h2', { class: 'ask' }, el('b', { text: c.name }), ': ' + S.prompt) : el('h2', { text: c.name });
+      var card = el('div', { class: 'card ' + (ci % 2 ? 'compB' : 'compA') }, head, c.definition ? el('p', { class: 'muted', text: c.definition }) : null);
       c.dims.forEach(function (d) {
         var id = c.code + '.' + d.code;
         var box = el('div', { class: 'item' + (showMissing && !(id in draft) ? ' missing' : ''), id: 'item-' + id });
         if (S.version === 2) {
-          // the statement, then the question at the left of five big buttons with the scale words inside
+          // the statement, then five big buttons with the scale words inside
           box.appendChild(el('p', { class: 'stmt', text: d.text }));
-          var btns = el('div', { class: 'btns', role: 'group', 'aria-label': S.prompt });
+          var btns = el('div', { class: 'btns', role: 'group', 'aria-label': c.name + ': ' + S.prompt });
           S.levels.forEach(function (t, k) { btns.appendChild(bigOption(id, k + 1, t)); });
-          box.appendChild(el('div', { class: 'scale' }, el('span', { class: 'q', text: S.prompt }), btns));
+          box.appendChild(el('div', { class: 'scale' }, btns));
         } else {
           box.appendChild(el('h3', { text: d.name }));
           var list = el('div', { class: 'levels' });

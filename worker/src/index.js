@@ -359,6 +359,6 @@ async function adminDo(env, real, who, action, key, args) {
   // secret and now let the page compute the session code shown with the QR code (sv.sessionCode). The competencies
   // and items of both survey versions are sent (each marked with its version); the page shows the class's version.
   return { state: shownState(s), secret: s.secret, responses: await allRows(), competencies: ALL_COMPETENCIES, items: ALL_ITEMS,
-           versions: VERSIONS.map(v => ({ n: v.n, name: v.name, summary: v.summary, levels: v.levels, na: v.na })),
+           versions: VERSIONS.map(v => ({ n: v.n, name: v.name, summary: v.summary, levels: v.levels, na: v.na })), defaultVersion: sv.DEFAULT_VERSION,
            open: s.rounds.filter(r => sv.isOpen(r, now)).map(r => r.id), now: new Date(now).toISOString() };
 }

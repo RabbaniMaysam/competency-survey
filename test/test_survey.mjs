@@ -25,11 +25,12 @@ ok(versionOf(2).items.length === 18 && versionOf('1').items.length === 25 && ver
 // a new class
 const s = sv.newClass('  BUS 101  ', T0);
 ok(s.title === 'BUS 101' && s.roster.length === 0 && s.off.join() === 'equity' && s.rounds.map(r => r.id).join() === 'start,end' && s.rounds.every(r => !r.open), 'new class: equity off, two closed rounds');
-ok(s.version === 1 && sv.version(s).n === 1, 'new class: survey version 1');
+ok(s.version === 2 && sv.version(s).n === 2 && sv.activeItems(s).length === 18 && sv.DEFAULT_VERSION === 2, 'new class: survey version 2 by default');
+sv.ADMIN.saveSettings(s, { version: '1' }, T0);  // the rest of these checks use version 1
 ok(sv.activeItems(s).length === 22 && sv.activeCompetencies(s).length === 7 && !sv.activeItems(s).some(i => i.comp === 'equity'), 'equity items are left out by default');
 const old = sv.upgrade({ title: 'x' });
-ok(old.off.join() === 'equity' && old.rounds.length === 2 && Array.isArray(old.roster) && old.version === 1, 'upgrade fills missing fields, version 1');
-ok(sv.upgrade({ title: 'x', version: 2 }).version === 2 && sv.upgrade({ title: 'x', version: 9 }).version === 1, 'upgrade keeps a known version, resets an unknown one');
+ok(old.off.join() === 'equity' && old.rounds.length === 2 && Array.isArray(old.roster) && old.version === 2, 'upgrade fills missing fields, the default version');
+ok(sv.upgrade({ title: 'x', version: 1 }).version === 1 && sv.upgrade({ title: 'x', version: 9 }).version === 2, 'upgrade keeps a known version, resets an unknown one');
 
 // roster
 sv.ADMIN.importRoster(s, 'first,last,email\nAmy,Zed,AZ@mail.montclair.edu\nBo,Abe,bo@montclair.edu');
@@ -147,6 +148,7 @@ ok(s.code === false && sv.studentView(s, 'bo@montclair.edu', [], T0).needCode ==
 // survey version: a per-class setting, changed only while both rounds are closed; each version keeps its own off list
 {
   const w = sv.newClass('Versions', T0);
+  sv.ADMIN.saveSettings(w, { version: '1' }, T0);
   sv.ADMIN.importRoster(w, 'first,last,email\nAmy,Zed,az@x.edu');
   throws(() => sv.ADMIN.saveSettings(w, { version: '3' }, T0), /Unknown survey version/, 'unknown version refused');
   sv.ADMIN.openRound(w, 'start', '', T0);
@@ -172,7 +174,7 @@ ok(s.code === false && sv.studentView(s, 'bo@montclair.edu', [], T0).needCode ==
   // student view of version 2: heading, intro per round, instruction, prompt, five levels, statements
   sv.ADMIN.openRound(w, 'end', '', T0);
   const v2 = sv.studentView(w, 'az@x.edu', [], T0);
-  ok(v2.version === 2 && v2.heading === 'Career skills self-assessment' && v2.levels.length === 5 && v2.na === false && v2.instruction && v2.prompt
+  ok(v2.version === 2 && v2.heading === 'Career skills self-assessment' && v2.levels.length === 5 && v2.na === false && v2.instruction && v2.prompt === 'Rate your confidence in doing the following'
     && v2.competencies.length === 6 && v2.competencies.every(c => c.definition === '' && c.dims.every(d => d.text)) && v2.rounds[0].intro && v2.rounds[1].intro && v2.rounds[0].intro !== v2.rounds[1].intro
     && v2.rounds[1].open, 'student view of version 2');
   const v1 = sv.studentView(s, 'bo@montclair.edu', [], T0);
