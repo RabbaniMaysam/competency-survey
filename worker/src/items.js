@@ -208,29 +208,29 @@ export const LEVELS_V2 = ['Not at all', 'A little', 'Somewhat', 'Mostly', 'Fully
  */
 export const COMPETENCIES_V2 = [
   { code: 'communication2', name: 'Communication', dims: [
-    { code: 'present', name: 'Present without notes', text: 'Presenting to a class or a group clearly, without reading from your notes.' },
-    { code: 'memo', name: 'Write a clear memo', text: 'Writing a clear one-page memo or report that someone else can act on.' },
-    { code: 'summarize', name: 'Summarize before responding', text: 'Summarizing what someone else said in a discussion before you respond.' }] },
+    { code: 'present', name: 'Present without notes', text: 'Presenting clearly to a class or group without reading from your notes.' },
+    { code: 'memo', name: 'Write a clear memo', text: 'Writing a one-page memo or report that someone else can act on.' },
+    { code: 'summarize', name: 'Summarize before responding', text: 'Summarizing what someone said before you respond.' }] },
   { code: 'teamwork2', name: 'Teamwork and leadership', dims: [
-    { code: 'share', name: 'Do own share on time', text: 'Doing your share of group work on time, without being reminded.' },
-    { code: 'disagree', name: 'Settle disagreements', text: 'Helping your group settle a disagreement without anyone checking out.' },
-    { code: 'plan', name: 'Set up a plan', text: 'Setting up a plan for a group that has none: tasks, owners, and deadlines.' }] },
+    { code: 'share', name: 'Do own share on time', text: 'Doing your share of group work on time without being reminded.' },
+    { code: 'disagree', name: 'Settle disagreements', text: 'Helping your group settle a disagreement and keep everyone on board.' },
+    { code: 'plan', name: 'Set up a plan', text: 'Setting up a plan for a group that has none: who does what, and by when.' }] },
   { code: 'thinking2', name: 'Critical thinking and data', dims: [
-    { code: 'parts', name: 'Break a question into parts', text: 'Breaking a messy question into smaller parts you can answer.' },
-    { code: 'numbers', name: 'Use data to test a claim', text: 'Using numbers or data to support or reject a claim.' },
-    { code: 'sources', name: 'Judge a source', text: 'Judging whether a source, a statistic, or an AI answer is trustworthy.' }] },
+    { code: 'parts', name: 'Break a question into parts', text: 'Breaking a messy question into smaller ones you can answer.' },
+    { code: 'numbers', name: 'Use data to test a claim', text: 'Using data to support or reject a claim.' },
+    { code: 'sources', name: 'Judge a source', text: 'Judging whether a source, a statistic, or an AI answer can be trusted.' }] },
   { code: 'technology2', name: 'Technology', dims: [
-    { code: 'software', name: 'Analyze data in software', text: 'Using spreadsheet or statistical software (Excel, R, Stata) to analyze data.' },
-    { code: 'selfteach', name: 'Teach oneself a tool', text: 'Teaching yourself a new software tool from its documentation or videos.' },
-    { code: 'ai', name: 'Use AI openly', text: 'Using AI tools for schoolwork in a way you could openly explain to a professor or employer.' }] },
+    { code: 'software', name: 'Analyze data in software', text: 'Analyzing data in software such as Excel, R, or Stata.' },
+    { code: 'selfteach', name: 'Teach oneself a tool', text: 'Teaching yourself a new software tool from documentation or videos.' },
+    { code: 'ai', name: 'Use AI openly', text: 'Using AI for schoolwork in a way you could explain openly to a professor or employer.' }] },
   { code: 'professionalism2', name: 'Professionalism', dims: [
-    { code: 'deadlines', name: 'Meet deadlines', text: 'Meeting deadlines and commitments without last-minute excuses.' },
+    { code: 'deadlines', name: 'Meet deadlines', text: 'Meeting deadlines without last-minute excuses.' },
     { code: 'check', name: 'Check own work', text: 'Checking your work for errors before you submit it.' },
-    { code: 'email', name: 'Communicate professionally', text: 'Communicating with professors and employers professionally (email, meetings, follow-up).' }] },
+    { code: 'email', name: 'Communicate professionally', text: 'Communicating professionally with professors and employers, by email and in person.' }] },
   { code: 'career2', name: 'Career and self-development', dims: [
     { code: 'strengths', name: 'Name own strengths and weaknesses', text: 'Naming your two strongest and two weakest skills for the job you want.' },
     { code: 'requirements', name: 'Know what the job requires', text: 'Knowing what the job you want requires and what you still lack.' },
-    { code: 'outreach', name: 'Reach out to strangers', text: 'Reaching out to people you do not know (alumni, professors, professionals) to learn about careers.' }] }
+    { code: 'outreach', name: 'Reach out to strangers', text: 'Contacting people you do not know, such as alumni or professionals, to learn about careers.' }] }
 ];
 
 /** Every item of version 2 in survey order: {id, comp, compName, dim, dimName, text, version}. */
@@ -249,7 +249,7 @@ export const VERSIONS = [
     summary: 'NACE Career Competency Assessment Tool: 25 items in 8 competencies, each answered with one of four level descriptions or N/A.' },
   { n: 2, name: 'Version 2', title: 'Career skills self-assessment', competencies: COMPETENCIES_V2, items: ITEMS_V2, levels: LEVELS_V2, na: false, naText: '',
     intro: {
-      start: 'Employers say the skills below matter as much as your major. This takes about 4 minutes. There are no right answers: it is for you, to notice where you stand now. Later in the semester you will answer the same questions again.',
+      start: 'Employers say the skills below matter as much as your major. This takes about 4 minutes. There are no right answers: it is for you to see where you stand now. Later in the semester you will answer the same questions again.',
       end: 'A few months ago you rated how confident you were in these skills. Rate them again, as you are today.'
     },
     instruction: 'For each statement below, think about class, group projects, a job or internship, a club, or anything else you have done.',
