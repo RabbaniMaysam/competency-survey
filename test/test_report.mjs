@@ -85,5 +85,28 @@ ok(di.start === null && near(di.end.overall, 4) && di.change === null, 'a studen
 const empty = report(s, []);
 ok(empty.rounds[0].submitted === 0 && empty.overall.start.n === 0 && empty.overall.start.mean === null && empty.overall.change.n === 0 && empty.students.length === 0 && empty.items.length === 22, 'empty class: zeros and nulls');
 
+// five levels (version 2): dist has 5 level counts and an N/A slot that stays 0; applying = share at 4 or 5
+a = answerStat([1, 5, 5, 4, 2], 5);
+ok(a.n === 5 && a.na === 0 && a.dist.join() === '1,1,0,1,2,0' && near(a.mean, 3.4) && near(a.applying, 0.6), 'answer statistic with five levels');
+// a version 2 class: the report uses the 18 version 2 items and ignores answers to version 1 items
+{
+  const w = sv.newClass('V2', T0);
+  sv.ADMIN.importRoster(w, 'first,last,email\nAmy,Zed,az@x.edu\nBo,Abe,bo@x.edu');
+  sv.ADMIN.saveSettings(w, { version: '2' }, T0);
+  const ids2 = sv.activeItems(w).map(i => i.id);
+  const fill2 = (level, except) => { const o = {}; ids2.forEach(id => { o[id] = level; }); return Object.assign(o, except || {}); };
+  const rows2 = [
+    { round: 'start', email: 'az@x.edu', answers: Object.assign(fill2(2), { 'career.strengths': 4 }), submitted: '2026-09-02T00:00:00Z' },
+    { round: 'start', email: 'bo@x.edu', answers: fill2(5, { 'career2.outreach': 1 }), submitted: '2026-09-02T00:00:00Z' },
+    { round: 'end', email: 'az@x.edu', answers: fill2(4), submitted: '2026-12-02T00:00:00Z' }
+  ];
+  const R2 = report(w, rows2);
+  ok(R2.version === 2 && R2.levels.length === 5 && R2.na === false && R2.competencies.length === 6 && R2.items.length === 18 && R2.items.every(i => /2\./.test(i.id)), 'version 2 report: 18 items, five levels, no N/A');
+  const out = R2.items.find(i => i.id === 'career2.outreach');
+  ok(out.start.n === 2 && near(out.start.mean, 1.5) && out.start.dist.join() === '1,1,0,0,0,0' && near(out.start.applying, 0) && out.start.na === 0, 'version 2 item statistic');
+  ok(near(R2.overall.start.mean, (2 + (17 * 5 + 1) / 18) / 2) && near(R2.overall.start.applying, 17 / 36) && R2.overall.start.dist.length === 6, 'version 2 overall: applying = share at level 4 or 5');
+  ok(R2.overall.change.n === 1 && near(R2.overall.change.mean, 2) && R2.students.find(x => x.email === 'az@x.edu').start.na === 0, 'version 2 change; the version 1 answer is ignored');
+}
+
 console.log('passed', pass, 'failed', fail);
 process.exit(fail ? 1 : 0);

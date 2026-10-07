@@ -1,9 +1,15 @@
 /**
- * The survey's items: the 8 competencies of the NACE Competency Assessment Tool (student version, 2024),
- * with their dimensions (25 in all: Communication has four, the others three). Each dimension is rated on
- * the four LEVELS, each with its own descriptor, or N/A. Text as in the PDF.
+ * The survey's items, in two versions; a class uses one (its `version` setting, 1 by default, changed on the
+ * instructor page's Settings tab). See VERSIONS at the end of this file.
+ *
+ * Version 1: the 8 competencies of the NACE Competency Assessment Tool (student version, 2024), with their
+ * dimensions (25 in all: Communication has four, the others three). Each dimension is rated on the four
+ * LEVELS, each with its own descriptor, or N/A. Text as in the PDF.
+ * Version 2: 6 blocks of 3 one-sentence statements (18 in all), each rated for confidence on the five
+ * LEVELS_V2, with no N/A.
+ *
  * An item's id is competency code + '.' + dimension code (for example 'career.networking'); ids are stored
- * with the answers, so they must not change once a class has answers.
+ * with the answers, so they must not change once a class has answers, and the two versions' codes differ.
  * offByDefault: the competency starts turned off in a new class (the instructor turns it on in Settings).
  */
 
@@ -188,5 +194,73 @@ export const COMPETENCIES = [
   }
 ];
 
-/** Every item in survey order: {id, comp, compName, dim, dimName}. */
-export const ITEMS = COMPETENCIES.flatMap(c => c.dims.map(d => ({ id: c.code + '.' + d.code, comp: c.code, compName: c.name, dim: d.code, dimName: d.name })));
+/** Every item of version 1 in survey order: {id, comp, compName, dim, dimName, version}. */
+export const ITEMS = COMPETENCIES.flatMap(c => c.dims.map(d => ({ id: c.code + '.' + d.code, comp: c.code, compName: c.name, dim: d.code, dimName: d.name, version: 1 })));
+
+// ---------------------------------------------------------------- version 2
+
+/** The five-point confidence scale of version 2 (1 to 5). */
+export const LEVELS_V2 = ['Not at all', 'A little', 'Somewhat', 'Mostly', 'Fully'];
+
+/**
+ * Version 2: six blocks of three statements. A dimension's `name` is the short label used in the report and
+ * the responses tables; `text` is the statement the student rates.
+ */
+export const COMPETENCIES_V2 = [
+  { code: 'communication2', name: 'Communication', dims: [
+    { code: 'present', name: 'Present without notes', text: 'I can present to a class or a group clearly, without reading from my notes.' },
+    { code: 'memo', name: 'Write a clear memo', text: 'I can write a clear one-page memo or report that someone else can act on.' },
+    { code: 'summarize', name: 'Summarize before responding', text: 'In a discussion, I can summarize what someone else said before I respond.' }] },
+  { code: 'teamwork2', name: 'Teamwork and leadership', dims: [
+    { code: 'share', name: 'Do my share on time', text: 'I do my share of group work on time, without being reminded.' },
+    { code: 'disagree', name: 'Settle disagreements', text: 'When my group disagrees, I can help us settle it without anyone checking out.' },
+    { code: 'plan', name: 'Set up a plan', text: 'When a group has no plan, I can set one up: tasks, owners, and deadlines.' }] },
+  { code: 'thinking2', name: 'Critical thinking and data', dims: [
+    { code: 'parts', name: 'Break a question into parts', text: 'Facing a messy question, I can break it into smaller parts I can answer.' },
+    { code: 'numbers', name: 'Use data to test a claim', text: 'I can use numbers or data to support or reject a claim.' },
+    { code: 'sources', name: 'Judge a source', text: 'I can judge whether a source, a statistic, or an AI answer is trustworthy.' }] },
+  { code: 'technology2', name: 'Technology', dims: [
+    { code: 'software', name: 'Analyze data in software', text: 'I can use spreadsheet or statistical software (Excel, R, Stata) to analyze data.' },
+    { code: 'selfteach', name: 'Teach myself a tool', text: 'I can teach myself a new software tool from its documentation or videos.' },
+    { code: 'ai', name: 'Use AI openly', text: 'I can use AI tools for schoolwork in a way I could openly explain to a professor or employer.' }] },
+  { code: 'professionalism2', name: 'Professionalism', dims: [
+    { code: 'deadlines', name: 'Meet deadlines', text: 'I meet deadlines and commitments without last-minute excuses.' },
+    { code: 'check', name: 'Check my work', text: 'I check my work for errors before I submit it.' },
+    { code: 'email', name: 'Communicate professionally', text: 'I communicate with professors and employers professionally (email, meetings, follow-up).' }] },
+  { code: 'career2', name: 'Career and self-development', dims: [
+    { code: 'strengths', name: 'Name my strengths and weaknesses', text: 'I can name my two strongest and two weakest skills for the job I want.' },
+    { code: 'requirements', name: 'Know what the job requires', text: 'I know what the job I want requires and what I still lack.' },
+    { code: 'outreach', name: 'Reach out to strangers', text: 'I reach out to people I do not know (alumni, professors, professionals) to learn about careers.' }] }
+];
+
+/** Every item of version 2 in survey order: {id, comp, compName, dim, dimName, text, version}. */
+export const ITEMS_V2 = COMPETENCIES_V2.flatMap(c => c.dims.map(d => ({ id: c.code + '.' + d.code, comp: c.code, compName: c.name, dim: d.code, dimName: d.name, text: d.text, version: 2 })));
+
+// ---------------------------------------------------------------- the versions
+
+/**
+ * The two versions of the survey. n: the version number (the class setting); title: the student page's
+ * heading; levels: the scale (1 to levels.length); na: whether N/A is an answer; intro: the student page's
+ * opening text per round, instruction: the sentence after it, prompt: the question beside the options
+ * (version 2 only); summary: one line for the Settings tab.
+ */
+export const VERSIONS = [
+  { n: 1, name: 'Version 1', title: 'Competency self-assessment', competencies: COMPETENCIES, items: ITEMS, levels: LEVELS, na: true, naText: NA_TEXT,
+    summary: 'NACE Career Competency Assessment Tool: 25 items in 8 competencies, each answered with one of four level descriptions or N/A.' },
+  { n: 2, name: 'Version 2', title: 'Career skills self-assessment', competencies: COMPETENCIES_V2, items: ITEMS_V2, levels: LEVELS_V2, na: false, naText: '',
+    intro: {
+      start: 'Employers say the skills below matter as much as your major. This takes about 4 minutes. There are no right answers: it is for you, to notice where you stand now. Later in the semester you will answer the same questions again.',
+      end: 'A few months ago you rated how confident you were in these skills. Rate them again, as you are today.'
+    },
+    instruction: 'For each statement below, think about class, group projects, a job or internship, a club, or anything else you have done.',
+    prompt: 'How confident are you that you can do this today?',
+    summary: '18 one-sentence statements in 6 blocks, each rated on a five-point confidence scale (Not at all to Fully), no N/A.' }
+];
+COMPETENCIES.forEach(c => { c.version = 1; });
+COMPETENCIES_V2.forEach(c => { c.version = 2; });
+
+/** The version with number n, or version 1. */
+export const versionOf = n => VERSIONS.find(v => v.n === Number(n)) || VERSIONS[0];
+/** The competencies and items of both versions (each marked with its version), for the instructor page. */
+export const ALL_COMPETENCIES = VERSIONS.flatMap(v => v.competencies);
+export const ALL_ITEMS = VERSIONS.flatMap(v => v.items);

@@ -41,8 +41,24 @@
             border: 2px solid var(--line); border-radius: 10px; font-family: inherit; }
     .codelabel { text-align: center; margin-bottom: 12px; }
     .item { padding-top: 2px; scroll-margin-top: 16px; }
-    .item.missing h3 { color: var(--warn); }
-    .item.missing .opt { border-color: #f3c1bc; }
+    .item.missing h3, .item.missing .stmt { color: var(--warn); }
+    .item.missing .opt, .item.missing .big { border-color: #f3c1bc; }
+    /* version 2: the statement, then the question at the left of five big rounded buttons with the scale words inside */
+    .stmt { font-size: 17px; font-weight: 600; margin: 16px 0 8px; }
+    .scale { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+    .scale .q { flex: 0 0 150px; color: var(--muted); font-size: 14px; line-height: 1.3; }
+    .scale .btns { flex: 1 1 340px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+    .big { padding: 14px 4px; border-radius: 14px; border: 2px solid var(--line); background: #fff; color: var(--ink); font: inherit;
+           font-size: 15px; font-weight: 600; line-height: 1.2; text-align: center; cursor: pointer; box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
+           transition: transform .08s, background .12s, border-color .12s; }
+    .big:hover { border-color: #a9b8c8; transform: translateY(-1px); }
+    .big:active { transform: translateY(0); }
+    .big.on { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 2px 6px rgba(11, 92, 173, .35); }
+    @media (max-width: 480px) {
+      .scale .q { flex-basis: 100%; }
+      .scale .btns { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }
+      .big { font-size: 14px; padding: 12px 4px; }
+    }
     .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -2px 10px rgba(0, 0, 0, .08); }
     .bar div.in { max-width: 760px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
     .bar .state { color: var(--muted); font-size: 14px; flex: 1; }
@@ -165,7 +181,7 @@
     done = '';
     var item = document.getElementById('item-' + id);
     if (item) {
-      Array.prototype.forEach.call(item.querySelectorAll('.opt'), function (b) { b.classList.toggle('on', b.getAttribute('data-v') === String(value)); });
+      Array.prototype.forEach.call(item.querySelectorAll('[data-v]'), function (b) { b.classList.toggle('on', b.getAttribute('data-v') === String(value)); });
       item.classList.remove('missing');
     }
     var r = cur();
@@ -357,33 +373,45 @@
       });
       app.appendChild(picks);
     }
-    app.appendChild(el('h2', { style: 'margin-top:14px', text: 'Competency self-assessment: ' + r.name.toLowerCase() }));
+    app.appendChild(el('h2', { style: 'margin-top:14px', text: (S.heading || 'Competency self-assessment') + ': ' + r.name.toLowerCase() }));
     if (done) app.appendChild(el('div', { class: 'banner ok', text: done }));
     if (S.needCode && !r.started) {
       bar.hidden = true;
       app.appendChild(codeCard(r));
       return;
     }
+    var finish = 'Your answers are saved as you go, so you can finish later. Submit once every item has an answer' + (r.closes ? ' (by ' + when(r.closes) + ').' : '.');
     if (r.submitted) {
       app.appendChild(el('div', { class: 'banner note', text: 'You submitted this survey on ' + when(r.submitted) + '. You can change answers and submit again'
         + (r.closes ? ' until ' + when(r.closes) + '.' : ' while the survey is open.') }));
+    } else if (S.version === 2) {
+      // version 2: the round's opening text, the instruction sentence, then how saving works
+      if (r.intro) app.appendChild(el('p', { text: r.intro }));
+      app.appendChild(el('p', { text: S.instruction + ' ' + finish }));
     } else {
-      app.appendChild(el('p', {}, 'For each item, choose the description that fits you best. Choose N/A when you have not yet learned or applied it, or do not have enough information to assess yourself. '
-        + 'Your answers are saved as you go, so you can finish later. Submit once every item has an answer'
-        + (r.closes ? ' (by ' + when(r.closes) + ').' : '.')));
+      app.appendChild(el('p', {}, 'For each item, choose the description that fits you best. Choose N/A when you have not yet learned or applied it, or do not have enough information to assess yourself. ' + finish));
     }
 
     S.competencies.forEach(function (c, ci) {
-      var card = el('div', { class: 'card ' + (ci % 2 ? 'compB' : 'compA') }, el('h2', { text: c.name }), el('p', { class: 'muted', text: c.definition }));
+      var card = el('div', { class: 'card ' + (ci % 2 ? 'compB' : 'compA') }, el('h2', { text: c.name }), c.definition ? el('p', { class: 'muted', text: c.definition }) : null);
       c.dims.forEach(function (d) {
         var id = c.code + '.' + d.code;
-        var box = el('div', { class: 'item' + (showMissing && !(id in draft) ? ' missing' : ''), id: 'item-' + id }, el('h3', { text: d.name }));
-        var list = el('div', { class: 'levels' });
-        d.levels.forEach(function (t, k) {
-          list.appendChild(option(id, k + 1, String(k + 1), S.levels[k], t));
-        });
-        list.appendChild(option(id, 'na', 'N/A', 'Not applicable', S.naText));
-        box.appendChild(list);
+        var box = el('div', { class: 'item' + (showMissing && !(id in draft) ? ' missing' : ''), id: 'item-' + id });
+        if (S.version === 2) {
+          // the statement, then the question at the left of five big buttons with the scale words inside
+          box.appendChild(el('p', { class: 'stmt', text: d.text }));
+          var btns = el('div', { class: 'btns', role: 'group', 'aria-label': S.prompt });
+          S.levels.forEach(function (t, k) { btns.appendChild(bigOption(id, k + 1, t)); });
+          box.appendChild(el('div', { class: 'scale' }, el('span', { class: 'q', text: S.prompt }), btns));
+        } else {
+          box.appendChild(el('h3', { text: d.name }));
+          var list = el('div', { class: 'levels' });
+          d.levels.forEach(function (t, k) {
+            list.appendChild(option(id, k + 1, String(k + 1), S.levels[k], t));
+          });
+          list.appendChild(option(id, 'na', 'N/A', 'Not applicable', S.naText));
+          box.appendChild(list);
+        }
         card.appendChild(box);
       });
       app.appendChild(card);
@@ -391,10 +419,17 @@
     renderBar();
   }
 
+  /** Version 1: one answer button with its number, level name, and description. */
   function option(id, value, mark, label, text) {
     return el('button', { type: 'button', class: 'opt' + (String(draft[id]) === String(value) ? ' on' : ''), 'data-v': String(value),
                           on: { click: function () { choose(id, value); } } },
       el('span', { class: 'mk' }, el('span', { class: 'n', text: mark })), el('span', { class: 't' }, el('b', { text: label + ': ' }), text));
+  }
+
+  /** Version 2: one big button with the scale word inside. */
+  function bigOption(id, value, label) {
+    return el('button', { type: 'button', class: 'big' + (String(draft[id]) === String(value) ? ' on' : ''), 'data-v': String(value), text: label,
+                          on: { click: function () { choose(id, value); } } });
   }
 
   /** Before a round is started: the session code shown on the instructor's screen (it changes every S.codeSec seconds). */

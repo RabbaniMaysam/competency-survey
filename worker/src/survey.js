@@ -2,28 +2,30 @@
  * Competency survey: the rules, as pure functions on a class's state (one JSON row per class).
  *
  * State of a class:
- *   { title, created, roster: [{first, last, email}], off: [competency codes turned off],
+ *   { title, created, roster: [{first, last, email}], version: 1 or 2 (which survey the class uses, items.js),
+ *     off: [competency codes turned off, of either version],
  *     code: whether a student types the session code to start a round, codeSec: seconds between session codes,
  *     secret: random string the codes derive from,
  *     rounds: [{id: 'start' | 'end', name, open: bool, closes: ISO time or '', openedAt, closedAt}] }
  * A round is open while open is true and its closing time (if any) has not passed.
- * A student's answers to a round are one row of the responses table: answers = {itemId: 1..4 or 'na'},
- * saved = time of the last change, submitted = time of the first complete submission ('' before it).
+ * A student's answers to a round are one row of the responses table: answers = {itemId: a level number or 'na'}
+ * (version 1: 1 to 4 or 'na'; version 2: 1 to 5), saved = time of the last change, submitted = time of the first
+ * complete submission ('' before it). Answers to items of the other version, or of a competency turned off, are kept.
  */
 
 import { canonEmail, parseRoster } from './roster.js';
-import { COMPETENCIES, ITEMS, LEVELS, NA_TEXT } from './items.js';
+import { COMPETENCIES, VERSIONS, versionOf } from './items.js';
 
 export const ROUNDS = [{ id: 'start', name: 'Start of semester' }, { id: 'end', name: 'End of semester' }];
 export const DEFAULT_OFF = COMPETENCIES.filter(c => c.offByDefault).map(c => c.code);
-const VALUES = ['1', '2', '3', '4', 'na'];
+export const DEFAULT_VERSION = 1;
 
 const iso = ms => new Date(ms).toISOString();
 const text = s => String(s ?? '').trim();
 export const fullName = r => (r.first + ' ' + r.last).trim();
 
 export function newClass(title, now) {
-  return { title: text(title), created: iso(now), roster: [], off: DEFAULT_OFF.slice(), code: true, codeSec: CODE_SEC_DEFAULT, secret: randomSecret(),
+  return { title: text(title), created: iso(now), roster: [], version: DEFAULT_VERSION, off: DEFAULT_OFF.slice(), code: true, codeSec: CODE_SEC_DEFAULT, secret: randomSecret(),
            rounds: ROUNDS.map(r => ({ id: r.id, name: r.name, open: false, closes: '', openedAt: '', closedAt: '' })) };
 }
 
@@ -70,6 +72,7 @@ export function checkCode(s, code, nowMs) {
 export function upgrade(s) {
   if (!Array.isArray(s.roster)) s.roster = [];
   if (!Array.isArray(s.off)) s.off = DEFAULT_OFF.slice();
+  if (!VERSIONS.some(v => v.n === s.version)) s.version = DEFAULT_VERSION;  // classes made before version 2 existed use version 1
   if (typeof s.code !== 'boolean') s.code = true;
   if (!(s.codeSec > 0)) s.codeSec = CODE_SEC_DEFAULT;
   if (!Array.isArray(s.rounds)) s.rounds = [];
@@ -79,9 +82,12 @@ export function upgrade(s) {
 
 export const student = (s, email) => s.roster.find(r => r.email === canonEmail(email)) || null;
 
-/** The competencies turned on in this class, in survey order, with their full text. */
-export const activeCompetencies = s => COMPETENCIES.filter(c => s.off.indexOf(c.code) === -1);
-export const activeItems = s => ITEMS.filter(i => s.off.indexOf(i.comp) === -1);
+/** The survey version the class uses (items.js). */
+export const version = s => versionOf(s.version);
+
+/** The competencies of the class's version turned on, in survey order, with their full text. */
+export const activeCompetencies = s => version(s).competencies.filter(c => s.off.indexOf(c.code) === -1);
+export const activeItems = s => version(s).items.filter(i => s.off.indexOf(i.comp) === -1);
 
 export function round(s, id) {
   const r = s.rounds.find(x => x.id === String(id));
@@ -91,14 +97,15 @@ export function round(s, id) {
 
 export const isOpen = (r, ms) => !!r.open && (!r.closes || ms < Date.parse(r.closes));
 
-/** The answers a student sends, reduced to the items turned on, each 1 to 4 or 'na'. */
+/** The answers a student sends, reduced to the items turned on, each a level of the class's version (or 'na' where the version has it). */
 export function cleanAnswers(s, raw) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const V = version(s), values = V.levels.map((l, k) => String(k + 1)).concat(V.na ? ['na'] : []);
   const out = {};
   activeItems(s).forEach(i => {
     if (!(i.id in src) || src[i.id] === null || src[i.id] === '') return;
     const v = String(src[i.id]).toLowerCase();
-    if (VALUES.indexOf(v) === -1) throw new Error('An answer is not valid: ' + i.dimName + '.');
+    if (values.indexOf(v) === -1) throw new Error('An answer is not valid: ' + i.dimName + '.');
     out[i.id] = v === 'na' ? 'na' : Number(v);
   });
   return out;
@@ -114,15 +121,19 @@ export function studentView(s, email, rows, ms) {
   const me = student(s, email);
   if (!me) return { authorized: false, email: email, title: s.title };
   const mine = id => (rows || []).find(r => r.round === id) || null;
+  const V = version(s);
   return {
     authorized: true, email: me.email, name: fullName(me), title: s.title,
-    levels: LEVELS, naText: NA_TEXT,
+    // the survey version: its heading, scale, whether N/A is an answer, and (version 2) its texts
+    version: V.n, heading: V.title, levels: V.levels, na: V.na, naText: V.naText,
+    instruction: V.instruction || '', prompt: V.prompt || '',
     needCode: !!s.code,  // a round is started by typing the session code; a round with a stored row is started
     codeSec: codeSec(s), // seconds between codes (shown in the code field's label)
-    competencies: activeCompetencies(s).map(c => ({ code: c.code, name: c.name, definition: c.definition, dims: c.dims })),
+    // version 1 dims: {code, name, levels (four descriptions)}; version 2 dims: {code, name, text (the statement)}
+    competencies: activeCompetencies(s).map(c => ({ code: c.code, name: c.name, definition: c.definition || '', dims: c.dims })),
     rounds: s.rounds.map(r => {
       const row = mine(r.id);
-      return { id: r.id, name: r.name, open: isOpen(r, ms), closes: r.closes, started: !!row,
+      return { id: r.id, name: r.name, open: isOpen(r, ms), closes: r.closes, started: !!row, intro: V.intro ? V.intro[r.id] || '' : '',
                answers: row ? row.answers : {}, saved: row ? row.saved : '', submitted: row ? row.submitted : '' };
     })
   };
@@ -170,10 +181,20 @@ export const ADMIN = {
     s.roster.splice(s.roster.indexOf(st), 1);
   },
 
-  /** settings: {title, off: [competency codes turned off], code: whether students type the session code to start,
-   *  codeSec: seconds between session codes}. */
-  saveSettings(s, settings) {
+  /** settings: {title, version: 1 or 2, off: [competency codes of that version turned off], code: whether students
+   *  type the session code to start, codeSec: seconds between session codes}. The version changes only while no
+   *  round is open; off codes of the other version are kept as they are. */
+  saveSettings(s, settings, now) {
     const o = settings || {};
+    if ('version' in o && o.version !== '') {
+      const n = Number(o.version);
+      if (!VERSIONS.some(v => v.n === n)) throw new Error('Unknown survey version: ' + o.version + '.');
+      if (n !== s.version) {
+        const open = s.rounds.find(r => isOpen(r, now ?? Date.now()));
+        if (open) throw new Error('Close the ' + open.name.toLowerCase() + ' survey before changing the survey version.');
+        s.version = n;
+      }
+    }
     if ('codeSec' in o && o.codeSec !== '') {
       const sec = Number(o.codeSec);
       if (!(Number.isInteger(sec) && sec >= CODE_SEC_MIN && sec <= CODE_SEC_MAX)) {
@@ -187,10 +208,11 @@ export const ADMIN = {
       s.title = text(o.title);
     }
     if ('off' in o) {
-      const off = Array.isArray(o.off) ? o.off.map(String) : [];
-      off.forEach(code => { if (!COMPETENCIES.some(c => c.code === code)) throw new Error('Unknown competency: ' + code + '.'); });
-      if (off.length >= COMPETENCIES.length) throw new Error('At least one competency must stay on.');
-      s.off = COMPETENCIES.map(c => c.code).filter(code => off.indexOf(code) !== -1);
+      const comps = version(s).competencies, off = Array.isArray(o.off) ? o.off.map(String) : [];
+      off.forEach(code => { if (!comps.some(c => c.code === code)) throw new Error('Unknown competency: ' + code + '.'); });
+      if (off.length >= comps.length) throw new Error('At least one competency must stay on.');
+      // the other version's off codes stay; this version's are replaced, in survey order
+      s.off = s.off.filter(code => !comps.some(c => c.code === code)).concat(comps.map(c => c.code).filter(code => off.indexOf(code) !== -1));
     }
   },
 

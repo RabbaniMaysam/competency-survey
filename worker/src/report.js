@@ -2,10 +2,12 @@
  * Competency survey: the report statistics, as pure functions on a class's state and its response rows.
  * The instructor page's Report tab shows the result (tables, figures, and the PDF, Word, and Excel downloads).
  *
- * Only submitted surveys of students on the roster count. Levels are 1 (Emerging Knowledge) to 4 (Advanced
- * Application); N/A answers are counted but left out of every mean.
- *   item statistic:       n = answers at a level, mean and sd of those levels, dist = counts at levels 1 to 4 and N/A,
- *                         na = N/A answers, applying = share of the levels at 3 or 4.
+ * Only submitted surveys of students on the roster count. Levels are 1 to L, the class's survey version's scale
+ * (version 1: 1 Emerging Knowledge to 4 Advanced Application, or N/A; version 2: 1 Not at all to 5 Fully, no N/A);
+ * N/A answers are counted but left out of every mean.
+ *   item statistic:       n = answers at a level, mean and sd of those levels, dist = counts at levels 1 to L and N/A
+ *                         (the last entry, always 0 in version 2), na = N/A answers, applying = share of the levels
+ *                         at the top two (3 or 4 in version 1, 4 or 5 in version 2).
  *   competency statistic: a student's competency score is the mean of the student's non-N/A answers to its items;
  *                         n = students with a score, mean and sd of the scores; dist, na, applying pool the answers.
  *   overall:              the same with every item.
@@ -14,21 +16,21 @@
  *                         (t, two-sided p), and the counts of students who rose, stayed, and fell.
  */
 
-import { COMPETENCIES, LEVELS } from './items.js';
+import { versionOf } from './items.js';
 
 const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 const sd = a => { if (a.length < 2) return null; const m = mean(a); return Math.sqrt(a.reduce((t, x) => t + (x - m) * (x - m), 0) / (a.length - 1)); };
 
-/** Statistic of a list of answers (1 to 4 or 'na'). */
-export function answerStat(values) {
-  const dist = [0, 0, 0, 0, 0], nums = [];
-  values.forEach(v => { if (v === 'na') dist[4]++; else { dist[v - 1]++; nums.push(v); } });
-  return { n: nums.length, mean: mean(nums), sd: sd(nums), dist, na: dist[4], applying: nums.length ? (dist[2] + dist[3]) / nums.length : null };
+/** Statistic of a list of answers (1 to L or 'na'); L = number of levels, 4 by default. */
+export function answerStat(values, L = 4) {
+  const dist = new Array(L + 1).fill(0), nums = [];
+  values.forEach(v => { if (v === 'na') dist[L]++; else { dist[v - 1]++; nums.push(v); } });
+  return { n: nums.length, mean: mean(nums), sd: sd(nums), dist, na: dist[L], applying: nums.length ? (dist[L - 2] + dist[L - 1]) / nums.length : null };
 }
 
 /** Statistic of student scores, with the answers they pool. */
-function scoreStat(scores, answers) {
-  const a = answerStat(answers);
+function scoreStat(scores, answers, L) {
+  const a = answerStat(answers, L);
   return { n: scores.length, mean: mean(scores), sd: sd(scores), dist: a.dist, na: a.na, applying: a.applying };
 }
 
@@ -82,12 +84,14 @@ export const tTwoSided = (t, df) => betai(df / 2, 0.5, df / (df + t * t));
 
 /**
  * The report of a class. rows: every response row [{round, email, answers (object), submitted}].
- * Returns {rounds, levels, competencies, items, overall, pairs, students}; see the file comment for the statistics.
+ * Returns {version, levels, na, rounds, competencies, items, overall, pairs, students}; see the file comment for the
+ * statistics. Only the items of the class's survey version count; answers to the other version's items are ignored.
  */
 export function report(s, rows) {
   const onRoster = {};
   s.roster.forEach(r => { onRoster[r.email] = true; });
-  const comps = COMPETENCIES.filter(c => s.off.indexOf(c.code) === -1)
+  const V = versionOf(s.version), L = V.levels.length;
+  const comps = V.competencies.filter(c => s.off.indexOf(c.code) === -1)
     .map(c => ({ code: c.code, name: c.name, items: c.dims.map(d => ({ id: c.code + '.' + d.code, name: d.name })) }));
   const items = comps.flatMap(c => c.items.map(i => ({ id: i.id, comp: c.code, compName: c.name, name: i.name })));
   const ids = s.rounds.map(r => r.id);
@@ -113,16 +117,16 @@ export function report(s, rows) {
   const answersTo = (id, list) => list.map(x => x.answers[id]).filter(v => v !== undefined);
   const perRound = f => Object.fromEntries(ids.map(r => [r, f(r)]));  // {start: statistic, end: statistic}
   return {
-    title: s.title, levels: LEVELS, rounds,
+    title: s.title, version: V.n, levels: V.levels, na: V.na, rounds,
     pairs: { both: both.length, startOnly: sub[A].length - both.length, endOnly: sub[B].length - both.length },
     items: items.map(i => Object.assign({ id: i.id, comp: i.comp, compName: i.compName, name: i.name },
-      perRound(r => answerStat(answersTo(i.id, sub[r]))),
+      perRound(r => answerStat(answersTo(i.id, sub[r]), L)),
       { change: paired(both.map(e => [byMail[A][e].answers[i.id], byMail[B][e].answers[i.id]]).filter(p => p.every(v => v !== undefined && v !== 'na'))) })),
     competencies: comps.map(c => Object.assign({ code: c.code, name: c.name, itemIds: c.items.map(i => i.id) },
-      perRound(r => scoreStat(sub[r].map(x => scores[r][x.email].comps[c.code]).filter(v => v !== null), c.items.flatMap(i => answersTo(i.id, sub[r])))),
+      perRound(r => scoreStat(sub[r].map(x => scores[r][x.email].comps[c.code]).filter(v => v !== null), c.items.flatMap(i => answersTo(i.id, sub[r])), L)),
       { change: paired(both.map(e => [scores[A][e].comps[c.code], scores[B][e].comps[c.code]]).filter(p => p.every(v => v !== null))) })),
     overall: Object.assign(
-      perRound(r => scoreStat(sub[r].map(x => scores[r][x.email].overall).filter(v => v !== null), items.flatMap(i => answersTo(i.id, sub[r])))),
+      perRound(r => scoreStat(sub[r].map(x => scores[r][x.email].overall).filter(v => v !== null), items.flatMap(i => answersTo(i.id, sub[r])), L)),
       { change: paired(both.map(e => [scores[A][e].overall, scores[B][e].overall]).filter(p => p.every(v => v !== null))) }),
     // one row per student on the roster with a submitted survey: the scores of each round and the overall change
     students: s.roster.filter(r => ids.some(id => byMail[id][r.email])).map(r => {

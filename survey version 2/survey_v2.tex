@@ -1,0 +1,127 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{amssymb}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage{parskip}
+\usepackage{fancyhdr}
+\usepackage{tikz}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rfoot{\small Page \thepage}
+\lfoot{\small Career skills self-assessment, draft version 2 (for review)}
+\renewcommand{\headrulewidth}{0pt}
+\setlength{\tabcolsep}{3pt}
+
+% One option as a rounded button with its text inside.
+\newcommand{\btn}[1]{\tikz[baseline=(b.base)]\node[draw=gray!70, line width=0.6pt, rounded corners=5pt, inner sep=4pt, minimum height=0.85cm, minimum width=2.25cm, font=\footnotesize\bfseries, text=black!80, fill=gray!6] (b) {#1};}
+% The width of the prompt column and of each of the five button columns.
+\newlength{\promptw}\setlength{\promptw}{3.9cm}
+\newlength{\btnw}\setlength{\btnw}{\dimexpr(\textwidth-\promptw-36pt)/5\relax}
+\newcolumntype{B}{>{\centering\arraybackslash}p{\btnw}}
+
+% One block: its title, then the items.
+\newenvironment{skill}[1]{%
+  \subsection*{#1}%
+  \tabular{@{}>{\raggedright\arraybackslash}p{\promptw}BBBBB@{}}
+}{%
+  \endtabular\vspace{2pt}%
+}
+% One item: the statement on its own line, then the prompt at the left of the five buttons.
+\newcommand{\row}[1]{%
+  \multicolumn{6}{@{}p{\linewidth}@{}}{\rule{0pt}{14pt}#1} \\[1pt]
+  {\footnotesize\color{black!60} How confident are you that you can do this today?} & \btn{Not at all} & \btn{A little} & \btn{Somewhat} & \btn{Mostly} & \btn{Fully} \\[5pt]
+}
+
+% The one instruction sentence, used in both versions' introductions.
+\newcommand{\instruction}{%
+For each statement below, think about class, group projects, a job or internship, a club, or anything else you have done.}
+
+% The questions. One source, used verbatim in both versions.
+\newcommand{\surveyitems}{%
+\begin{skill}{1. Communication}
+\row{I can present to a class or a group clearly, without reading from my notes.}
+\row{I can write a clear one-page memo or report that someone else can act on.}
+\row{In a discussion, I can summarize what someone else said before I respond.}
+\end{skill}
+
+\begin{skill}{2. Teamwork and leadership}
+\row{I do my share of group work on time, without being reminded.}
+\row{When my group disagrees, I can help us settle it without anyone checking out.}
+\row{When a group has no plan, I can set one up: tasks, owners, and deadlines.}
+\end{skill}
+
+\begin{skill}{3. Critical thinking and data}
+\row{Facing a messy question, I can break it into smaller parts I can answer.}
+\row{I can use numbers or data to support or reject a claim.}
+\row{I can judge whether a source, a statistic, or an AI answer is trustworthy.}
+\end{skill}
+
+\begin{skill}{4. Technology}
+\row{I can use spreadsheet or statistical software (Excel, R, Stata) to analyze data.}
+\row{I can teach myself a new software tool from its documentation or videos.}
+\row{I can use AI tools for schoolwork in a way I could openly explain to a professor or employer.}
+\end{skill}
+
+\begin{skill}{5. Professionalism}
+\row{I meet deadlines and commitments without last-minute excuses.}
+\row{I check my work for errors before I submit it.}
+\row{I communicate with professors and employers professionally (email, meetings, follow-up).}
+\end{skill}
+
+\begin{skill}{6. Career and self-development}
+\row{I can name my two strongest and two weakest skills for the job I want.}
+\row{I know what the job I want requires and what I still lack.}
+\row{I reach out to people I do not know (alumni, professors, professionals) to learn about careers.}
+\end{skill}
+}
+
+\begin{document}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{center}
+{\LARGE\bfseries Career skills self-assessment}\\[4pt]
+{\large Start of semester}
+\end{center}
+
+Employers say the skills below matter as much as your major. This takes about 4 minutes. There are no right answers: it is for you, to notice where you stand now. Later in the semester you will answer the same questions again and see what changed.
+
+\instruction
+
+\surveyitems
+
+\clearpage
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{center}
+{\LARGE\bfseries Career skills self-assessment}\\[4pt]
+{\large End of semester}
+\end{center}
+
+A few months ago you rated how confident you were in these skills. Rate them again, as you are today. Afterwards you will see where you stood then and where you stand now.
+
+\instruction
+
+{\color{gray}\ldots\ followed by the same questions, word for word.}
+
+\clearpage
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section*{Notes for review (not part of the survey)}
+
+\begin{itemize}[leftmargin=1.5em]
+\item \textbf{The two versions are identical} except for the introductory sentences; the end version is shown here by its heading only.
+\item \textbf{Length.} 18 items in 6 blocks, about 280 words of questions, versus 25 items and about 1,500 words in version 1. Every item carries the prompt and the five options as buttons, as on the website.
+\item \textbf{Scale.} Confidence in five words, no N/A: a confidence question can be answered without having tried the thing, and every item then counts in every average.
+\item \textbf{Block titles} stay because the results page and the report average by block; the one-line definitions are gone.
+\item \textbf{After submitting}, the student sees the results and the action-plan step, which is a separate screen and a separate draft (action\_plan\_v2.pdf), not part of the survey.
+\item \textbf{Dropped from NACE.} Equity and inclusion (already off); act with integrity and respect diverse perspectives (ceiling items); situational awareness and inspire/persuade/motivate (too abstract to self-rate); non-verbal communication folded into presenting; networking narrowed to one concrete behavior.
+\item \textbf{Mapping to NACE.} 1 Communication; 2 Teamwork + Leadership; 3 Critical Thinking; 4 Technology; 5 Professionalism; 6 Career \& Self-development.
+\end{itemize}
+
+\end{document}
