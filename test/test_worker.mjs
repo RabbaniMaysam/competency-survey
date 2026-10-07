@@ -125,6 +125,14 @@ r = await stu(1, 'submit', ['start', Object.assign({}, all, { [items[1]]: 4 })])
 ok(r.ok && r.state.rounds[0].submitted === first && r.state.rounds[0].answers[items[1]] === 4, 'changes submitted; the first submission time is kept');
 ok(/not on the class roster/.test((await stu(9, 'save', ['start', all])).error), 'a stranger cannot save');
 ok(/closed/.test((await stu(2, 'save', ['end', all])).error), 'the end round is closed');
+// the interval between codes: 30 seconds by default, a setting sent to the student page and used by the Worker
+r = await adm('saveSettings', [{ codeSec: '20' }]);
+ok(r.ok && r.data.state.codeSec === 20 && (await stu(2, 'state')).state.codeSec === 20, 'interval saved as 20 seconds and sent to the student page');
+const near20 = [-1, 0, 1].map(k => sv.sessionCode({ secret: secret }, sv.codeSlot(Date.now(), { codeSec: 20 }) + k));
+// student 1 has started the round, so typing the code again checks it without adding a response row
+ok(/every 20 seconds/.test((await stu(1, 'unlock', ['start', ['0000', '1111', '2222', '3333'].find(c => near20.indexOf(c) === -1)])).error), 'a wrong code is refused with the interval in the message');
+ok((await stu(1, 'unlock', ['start', sv.sessionCode({ secret: secret }, sv.codeSlot(Date.now(), { codeSec: 20 }))])).ok, 'the 20-second code is accepted');
+ok(/from 3 to 300/.test((await adm('saveSettings', [{ codeSec: '1' }])).error), 'a 1-second interval is refused');
 r = await adm('saveSettings', [{ code: false }]);
 ok(r.ok && r.data.state.code === false && (await stu(2, 'state')).state.needCode === false, 'session code turned off');
 ok((await stu(2, 'save', ['start', { 'career.strengths': 1 }])).ok, 'without the code requirement a student saves directly');

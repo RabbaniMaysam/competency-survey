@@ -313,12 +313,12 @@ async function adminDo(env, real, who, action, key, args) {
     await writeClass(env, key, s);
     logs.push(['remove student', shown]);
   } else if (action === 'saveSettings') {
-    const before = JSON.stringify({ title: s.title, off: s.off, code: s.code });
+    const before = JSON.stringify({ title: s.title, off: s.off, code: s.code, codeSec: s.codeSec });
     sv.ADMIN.saveSettings(s, args[0]);
     await writeClass(env, key, s);
-    const after = JSON.stringify({ title: s.title, off: s.off, code: s.code });
+    const after = JSON.stringify({ title: s.title, off: s.off, code: s.code, codeSec: s.codeSec });
     if (after !== before) logs.push(['save settings', 'title: ' + s.title + '; turned off: ' + (s.off.map(c => COMPETENCIES.find(x => x.code === c).name).join(', ') || 'none')
-      + '; session code: ' + (s.code ? 'required' : 'not required')]);
+      + '; session code: ' + (s.code ? 'required' : 'not required') + ', changes every ' + sv.codeSec(s) + ' seconds']);
   } else if (action === 'openRound') {
     sv.ADMIN.openRound(s, args[0], args[1], now);
     await writeClass(env, key, s);

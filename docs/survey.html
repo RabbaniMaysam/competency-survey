@@ -397,7 +397,7 @@
       el('span', { class: 'mk' }, el('span', { class: 'n', text: mark })), el('span', { class: 't' }, el('b', { text: label + ': ' }), text));
   }
 
-  /** Before a round is started: the session code shown on the instructor's screen (it changes every 30 seconds). */
+  /** Before a round is started: the session code shown on the instructor's screen (it changes every S.codeSec seconds). */
   function codeCard(r) {
     var msg = el('div', { class: 'banner err', hidden: true });
     var input = el('input', { class: 'code', inputmode: 'numeric', autocomplete: 'off', maxlength: '4', 'aria-label': 'Session code' });
@@ -422,7 +422,7 @@
     input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') start(); });
     setTimeout(function () { input.focus(); }, 0);
     return el('div', { class: 'card', style: 'text-align:center' },
-      el('p', { class: 'codelabel', text: 'Type the session code shown on the screen. It changes every 30 seconds.' }), input, go, msg);
+      el('p', { class: 'codelabel', text: 'Type the session code shown on the screen. It changes every ' + (S.codeSec || 30) + ' seconds.' }), input, go, msg);
   }
 
   function statusList() {

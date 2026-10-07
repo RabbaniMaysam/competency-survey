@@ -71,21 +71,40 @@ ok(v.rounds[0].open && v.rounds[0].answers['career.strengths'] === 2 && !v.round
 ok(sv.studentView(s, 'stranger@x.edu', [], T0).authorized === false && !('rounds' in sv.studentView(s, 'stranger@x.edu', [], T0)), 'a stranger sees nothing');
 ok(v.needCode === true && v.rounds[0].started === true && v.rounds[1].started === false, 'student view: session code needed, a round with a stored row is started');
 
-// session code: 4 digits from the secret and the 30-second slot; the current and the previous code are accepted
-ok(s.code === true && /^[0-9a-f]{32}$/.test(s.secret) && sv.newClass('x', T0).secret !== s.secret, 'new class: code required, random secret');
-ok(sv.CODE_MS === 30000 && sv.codeSlot(T0 + 29999) === sv.codeSlot(T0) && sv.codeSlot(T0 + 30000) === sv.codeSlot(T0) + 1, '30-second slots');
-const slot = sv.codeSlot(T0), codes = [-2, -1, 0, 1].map(k => sv.sessionCode(s, slot + k));
+// session code: 4 digits from the secret and the slot (30 seconds by default); the current and the previous code are accepted
+ok(s.code === true && s.codeSec === 30 && /^[0-9a-f]{32}$/.test(s.secret) && sv.newClass('x', T0).secret !== s.secret, 'new class: code required, 30-second interval, random secret');
+const T30 = T0 - (T0 % 30000);
+ok(sv.codeMs(s) === 30000 && sv.codeSlot(T30 + 29999, s) === sv.codeSlot(T30, s) && sv.codeSlot(T30 + 30000, s) === sv.codeSlot(T30, s) + 1, '30-second slots');
+const slot = sv.codeSlot(T0, s), codes = [-2, -1, 0, 1].map(k => sv.sessionCode(s, slot + k));
 ok(codes.every(c => /^\d{4}$/.test(c)) && sv.sessionCode(s, slot) === codes[2] && sv.sessionCode({ secret: 'other' }, slot) !== codes[2], 'codes are 4 digits, fixed per slot, differ by secret');
 sv.checkCode(s, codes[2], T0); sv.checkCode(s, ' ' + codes[1] + ' ', T0);
 ok(true, 'current and previous code accepted');
-if (codes[0] !== codes[1] && codes[0] !== codes[2]) throws(() => sv.checkCode(s, codes[0], T0), /changes every 30 seconds/, 'a code two slots old refused');
+if (codes[0] !== codes[1] && codes[0] !== codes[2]) throws(() => sv.checkCode(s, codes[0], T0), /changes every 30 seconds/, 'a code two slots old refused, with the interval in the message');
 if (codes[3] !== codes[1] && codes[3] !== codes[2]) throws(() => sv.checkCode(s, codes[3], T0), /Wrong session code/, 'the next code refused');
 throws(() => sv.checkCode(s, '', T0), /Wrong session code/, 'empty code refused');
 ok(sv.upgrade({ title: 'x' }).code === true && sv.upgrade({ title: 'x', code: false }).code === false, 'upgrade: code required unless turned off');
+ok(sv.upgrade({ title: 'x' }).codeSec === 30 && sv.upgrade({ title: 'x', codeSec: 12 }).codeSec === 12, 'upgrade: a class without an interval receives 30 seconds');
 // the instructor page's copy of sessionCode gives the same codes
 const admin = fs.readFileSync(new URL('../docs/survey_admin.html', import.meta.url), 'utf8');
 const copy = new Function(admin.match(/function sessionCode\(secret, slot\) \{[\s\S]*?\n  \}/)[0] + '; return sessionCode;')();
-ok([0, 1, 2, 999, 123456].every(k => copy(s.secret, slot + k) === sv.sessionCode(s, slot + k)) && /var CODE_MS = 30000;/.test(admin), 'the instructor page computes the same codes');
+ok([0, 1, 2, 999, 123456].every(k => copy(s.secret, slot + k) === sv.sessionCode(s, slot + k)), 'the instructor page computes the same codes');
+const pageSec = new Function('D', admin.match(/function codeSec\(\) \{[^\n]*\}/)[0] + '; return codeSec();');
+ok(pageSec({ state: { codeSec: 12 } }) === 12 && pageSec({ state: {} }) === 30 && pageSec(null) === 30, 'the instructor page reads the interval, 30 seconds by default');
+
+// the interval between codes is a setting: slots, validity, and the error text follow it
+const g = sv.newClass('Interval', T0);
+sv.ADMIN.saveSettings(g, { codeSec: '12' });
+const T12 = T0 - (T0 % 12000) + 1000, g12 = sv.codeSlot(T12, g);
+ok(g.codeSec === 12 && sv.codeMs(g) === 12000 && sv.codeSlot(T12 + 10999, g) === g12 && sv.codeSlot(T12 + 11000, g) === g12 + 1
+  && sv.studentView(Object.assign(g, { roster: [{ first: 'A', last: 'B', email: 'a@x.edu' }] }), 'a@x.edu', [], T12).codeSec === 12, 'a 12-second interval: slots, and sent to the student page');
+sv.checkCode(g, sv.sessionCode(g, g12 - 1), T12);
+ok(true, 'the previous 12-second code accepted');
+const c12old = sv.sessionCode(g, g12 - 2);
+if (c12old !== sv.sessionCode(g, g12) && c12old !== sv.sessionCode(g, g12 - 1)) throws(() => sv.checkCode(g, c12old, T12), /changes every 12 seconds/, 'refused two slots later, with the interval in the message');
+sv.ADMIN.saveSettings(g, { title: 'Interval 2' });
+ok(g.codeSec === 12, 'saving without the interval keeps it');
+['2', '301', '6.5', 'x'].forEach(bad => throws(() => sv.ADMIN.saveSettings(g, { codeSec: bad }), /whole number of seconds from 3 to 300/, 'interval "' + bad + '" refused'));
+ok(g.codeSec === 12, 'a refused interval changes nothing');
 
 // settings: equity can be turned on, at least one competency stays on
 sv.ADMIN.saveSettings(s, { off: [] });
