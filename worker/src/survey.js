@@ -129,9 +129,30 @@ export function studentView(s, email, rows, ms) {
 }
 
 /** Instructor actions on the state (in place). Each throws with a message when refused. */
+/**
+ * What importing the CSV would change, without changing anything: the file's student count, how many of them are on
+ * the roster, the new students, and the students on the roster but not in the file (whom the instructor keeps or drops).
+ */
+export function previewRoster(roster, csv) {
+  const file = parseRoster(csv), seen = {}, on = {};
+  file.forEach(st => { seen[st.email] = true; });
+  roster.forEach(r => { on[r.email] = true; });
+  const pick = r => ({ first: r.first, last: r.last, email: r.email });
+  return { file: file.length, matched: file.filter(st => on[st.email]).length,
+           added: file.filter(st => !on[st.email]).map(pick), missing: roster.filter(r => !seen[r.email]).map(pick) };
+}
+
 export const ADMIN = {
-  importRoster(s, csv) {
-    s.roster = parseRoster(csv).sort((a, b) => (a.last + ' ' + a.first).localeCompare(b.last + ' ' + b.first));
+  /**
+   * Imports the CSV: the file's students make up the roster. keep: emails of students on the roster but not in the
+   * file who stay (unchanged); the others are dropped. Without keep (an older page), every student not in the file is dropped.
+   */
+  importRoster(s, csv, keep) {
+    const file = parseRoster(csv), inFile = {}, stay = {};
+    file.forEach(r => { inFile[r.email] = true; });
+    (Array.isArray(keep) ? keep : []).forEach(e => { stay[canonEmail(e)] = true; });
+    s.roster = file.concat(s.roster.filter(r => !inFile[r.email] && stay[r.email]))
+      .sort((a, b) => (a.last + ' ' + a.first).localeCompare(b.last + ' ' + b.first));
   },
 
   addStudent(s, first, last, email) {

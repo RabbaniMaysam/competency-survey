@@ -27,7 +27,7 @@ Rules are in `worker/src/survey.js`; storage is the `classes`, `responses`, and 
 
 ## Roster files
 
-The import (`parseRoster` in `worker/src/roster.js`, a copy of the attendance tool's) reads the Canvas gradebook export, with a "Student" column ("Last, First") and a "SIS Login ID" column (the address before the @, completed with `@montclair.edu`; the "Points Possible" row and Canvas's test student are skipped), or a CSV with first name, last name, and email columns in any order. Addresses are lowercased, and `@mail.montclair.edu` is stored as `@montclair.edu`; a student may sign in with either form.
+The import (`parseRoster` in `worker/src/roster.js`, a copy of the attendance tool's) reads the Canvas gradebook export, with a "Student" column ("Last, First") and a "SIS Login ID" column (the address before the @, completed with `@montclair.edu`; the "Points Possible" row and Canvas's test student are skipped), or a CSV with first name, last name, and email columns in any order. Addresses are lowercased, and `@mail.montclair.edu` is stored as `@montclair.edu`; a student may sign in with either form. Importing does not replace the roster outright: a dialog (from `previewRoster`) lists the new students and the students on the roster but missing from the file, each with a checkbox, checked (kept) by default; the answers of dropped students are kept and listed as not on the roster.
 
 ## Sign-in
 

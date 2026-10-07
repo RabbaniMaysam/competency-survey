@@ -295,10 +295,13 @@ async function adminDo(env, real, who, action, key, args) {
   // The statistics of the Report tab (worker/src/report.js).
   if (action === 'report') return Object.assign(report(s, await allRows()), { generated: new Date(now).toISOString() });
 
+  // What importing a roster file would change; nothing is saved (the page then sends importRoster with the students to keep).
+  if (action === 'previewRoster') return sv.previewRoster(s.roster, args[0]);
+
   const logs = [];  // [action, detail] lines written after the change succeeds
   if (action === 'importRoster') {
     const before = s.roster.map(r => r.email);
-    sv.ADMIN.importRoster(s, args[0]);
+    sv.ADMIN.importRoster(s, args[0], args[1]);
     await writeClass(env, key, s);
     const after = s.roster.map(r => r.email);
     logs.push(['import roster', after.length + ' students; added: ' + (after.filter(e => before.indexOf(e) === -1).join(', ') || 'none')

@@ -33,6 +33,19 @@ ok(sv.student(s, 'AZ@MAIL.montclair.edu').first === 'Amy', 'student found by eit
 sv.ADMIN.removeStudent(s, 'cy@montclair.edu');
 ok(s.roster.length === 2, 'student removed');
 throws(() => sv.ADMIN.removeStudent(s, 'cy@montclair.edu'), /not on the roster/, 'removing twice refused');
+// Import with a choice: a preview lists the students not in the file; the ones the instructor keeps stay unchanged.
+{
+  const k = sv.newClass('Keep test', T0);
+  sv.ADMIN.importRoster(k, 'first,last,email\nAmy,Zed,az@x.edu\nBo,Abe,bo@x.edu\nCy,Moe,cy@x.edu');
+  const csv2 = 'first,last,email\nAmy,Zed,AZ@x.edu\nDi,Oak,di@x.edu';
+  const p = sv.previewRoster(k.roster, csv2);
+  ok(p.file === 2 && p.matched === 1 && p.added.map(r => r.email).join() === 'di@x.edu' && p.missing.map(r => r.email).join() === 'bo@x.edu,cy@x.edu' && k.roster.length === 3,
+    'preview: file count, matched, new, and missing students; nothing changes');
+  sv.ADMIN.importRoster(k, csv2, ['CY@x.edu']);
+  ok(k.roster.map(r => r.email).join() === 'cy@x.edu,di@x.edu,az@x.edu', 'a kept student stays, an unchecked one is dropped, sorted by last name');
+  sv.ADMIN.importRoster(k, csv2);
+  ok(k.roster.map(r => r.email).join() === 'di@x.edu,az@x.edu', 'without a keep list (older page) every student not in the file is dropped');
+}
 
 // rounds
 const start = sv.round(s, 'start');

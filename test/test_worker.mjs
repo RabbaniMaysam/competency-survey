@@ -68,6 +68,11 @@ r = await adm('get');
 ok(r.ok && r.data.state.off.join() === 'equity' && r.data.items.length === 25 && r.data.competencies.length === 8 && r.data.levels.length === 4 && r.data.open.length === 0, 'new class: equity off, nothing open');
 r = await adm('importRoster', ['first,last,email\nF1,L1,' + m(1) + '\nF2,L2,' + m(2) + '\nF3,L3,' + m(3)]);
 ok(r.ok && r.data.state.roster.length === 3, 'roster imported');
+r = await adm('previewRoster', ['first,last,email\nF1,L1,' + m(1) + '\nF2,L2,' + m(2)]);
+ok(r.ok && r.data.file === 2 && r.data.matched === 2 && r.data.added.length === 0 && r.data.missing.map(x => x.email).join() === m(3)
+  && (await adm('get')).data.state.roster.length === 3, 'roster preview lists the student not in the file and changes nothing');
+r = await adm('importRoster', ['first,last,email\nF1,L1,' + m(1) + '\nF2,L2,' + m(2), [m(3)]]);
+ok(r.ok && r.data.state.roster.length === 3, 'import keeps the student the instructor chose to keep');
 ok((await stu(9, 'state')).state.authorized === false && !(await stu(9, 'state')).state.instructor, 'account outside the roster is blocked and not flagged as instructor');
 r = await post('/survey', { token: PROF, class: K, action: 'state' });
 ok(r.state.authorized === false && r.state.instructor === true, 'an instructor account on the student page is flagged for the link to the instructor page');
