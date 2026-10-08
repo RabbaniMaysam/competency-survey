@@ -181,6 +181,16 @@ export const ADMIN = {
     s.roster.splice(s.roster.indexOf(st), 1);
   },
 
+  /** Removes several students at once. Every email must be on the roster (duplicates count once). Returns the removed rows. */
+  removeStudents(s, emails) {
+    const seen = {};
+    const list = (Array.isArray(emails) ? emails : []).map(e => canonEmail(e)).filter(e => !seen[e] && (seen[e] = true));
+    if (!list.length) throw new Error('No student is selected.');
+    const rows = list.map(e => { const st = student(s, e); if (!st) throw new Error(e + ' is not on the roster.'); return st; });
+    s.roster = s.roster.filter(r => rows.indexOf(r) === -1);
+    return rows;
+  },
+
   /** settings: {title, version: 1 or 2, off: [competency codes of that version turned off], code: whether students
    *  type the session code to start, codeSec: seconds between session codes}. The version changes only while no
    *  round is open; off codes of the other version are kept as they are. */

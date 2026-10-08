@@ -261,6 +261,14 @@ async function adminDo(env, real, who, action, key, args) {
     return { key: newKey, classes: await classList(env) };
   }
 
+  // What deleting the class would remove; the page shows it before asking for the key.
+  if (action === 'deleteInfo') {
+    const s = await readClass(env, key);
+    const resp = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(submitted != \'\') AS submitted FROM responses WHERE class = ?').bind(key).first();
+    const log = await env.DB.prepare('SELECT COUNT(*) AS n FROM log WHERE class = ?').bind(key).first();
+    return { title: s.title, roster: s.roster.length, responses: resp.n, submitted: resp.submitted || 0, log: log.n };
+  }
+
   if (action === 'deleteClass') {
     if (String(args[0]) !== key) throw new Error('Type the class key exactly to delete the class.');
     await readClass(env, key);
@@ -315,6 +323,10 @@ async function adminDo(env, real, who, action, key, args) {
     sv.ADMIN.removeStudent(s, args[0]);
     await writeClass(env, key, s);
     logs.push(['remove student', shown]);
+  } else if (action === 'removeStudents') {
+    const rows = sv.ADMIN.removeStudents(s, args[0]);
+    await writeClass(env, key, s);
+    logs.push(['remove students', rows.length + ' students: ' + rows.map(r => sv.fullName(r) + ' (' + r.email + ')').join(', ')]);
   } else if (action === 'saveSettings') {
     const before = JSON.stringify({ title: s.title, version: s.version, off: s.off, code: s.code, codeSec: s.codeSec });
     sv.ADMIN.saveSettings(s, args[0], now);

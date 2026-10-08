@@ -194,6 +194,11 @@ r = await adm('removeStudent', [m(1)]);
 ok(r.ok && r.data.state.roster.length === 2 && r.data.responses.some(x => x.email === m(1)), 'student removed; answers kept');
 r = await adm('addStudent', ['Al', 'Ash', 'ASH1@mail.montclair.edu']);
 ok(r.ok && r.data.state.roster.some(x => x.email === 'ash1@montclair.edu'), 'student added, address folded');
+await adm('addStudent', ['Bo', 'Bash', 'bashb1@montclair.edu']);
+ok(/nobody@x.edu is not on the roster/.test((await adm('removeStudents', [['bashb1@montclair.edu', 'nobody@x.edu']])).error) && (await adm('get')).data.state.roster.length === 4, 'bulk removal with an unknown student refused and changes nothing');
+r = await adm('removeStudents', [['ash1@mail.montclair.edu', 'bashb1@montclair.edu']]);
+ok(r.ok && r.data.state.roster.length === 2 && !r.data.state.roster.some(x => /ash1|bashb1/.test(x.email)), 'two students removed at once');
+ok(/^2 students: Al Ash \(ash1@montclair.edu\), Bo Bash/.test((await adm('log', ['remove students', 'all', 5])).data.rows[0].detail), 'one log line names the removed students');
 r = await adm('deleteRoundAnswers', ['end']);
 const endRound = r.data && r.data.state.rounds.find(x => x.id === 'end');
 ok(r.ok && !r.data.responses.some(x => x.round === 'end') && r.data.responses.length === 1 && !endRound.openedAt && !endRound.closedAt, 'all answers to the closed end survey deleted; it is not opened again');
@@ -241,6 +246,9 @@ ok(r.data.responses.some(x => x.email === m(2) && x.round === 'end' && x.answers
 ok((await adm('log', ['', 'instructor', 5000])).data.rows.some(x => x.action === 'save settings' && /survey version 2/.test(x.detail || x.text || JSON.stringify(x))), 'the version change is logged');
 
 // delete
+r = await adm('deleteInfo');
+ok(r.ok && r.data.state === undefined && r.data.roster === 2 && r.data.responses > 0 && r.data.submitted > 0 && r.data.submitted <= r.data.responses
+  && r.data.log === (await adm('log', ['', 'all', 20000])).data.rows.length && typeof r.data.title === 'string', 'deleteInfo counts: ' + JSON.stringify(r.data));
 ok(/Type the class key/.test((await adm('deleteClass', ['wrong'])).error), 'delete needs the key typed');
 r = await adm('deleteClass', [K]);
 ok(r.ok && !r.data.classes.some(c => c.key === K) && /does not match/.test((await adm('get')).error), 'class deleted');

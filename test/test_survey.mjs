@@ -42,6 +42,15 @@ ok(sv.student(s, 'AZ@MAIL.montclair.edu').first === 'Amy', 'student found by eit
 sv.ADMIN.removeStudent(s, 'cy@montclair.edu');
 ok(s.roster.length === 2, 'student removed');
 throws(() => sv.ADMIN.removeStudent(s, 'cy@montclair.edu'), /not on the roster/, 'removing twice refused');
+// Removing several students at once: all must be on the roster, duplicates count once, nothing changes on a refusal.
+throws(() => sv.ADMIN.removeStudents(s, []), /No student is selected/, 'bulk removal of nobody refused');
+throws(() => sv.ADMIN.removeStudents(s, ['bo@montclair.edu', 'cy@montclair.edu']), /cy@montclair.edu is not on the roster/, 'bulk removal with an unknown email refused');
+ok(s.roster.length === 2, 'a refused bulk removal changes nothing');
+{
+  const copy = JSON.parse(JSON.stringify(s));
+  const gone = sv.ADMIN.removeStudents(copy, ['AZ@mail.montclair.edu', 'az@montclair.edu']);
+  ok(copy.roster.length === 1 && copy.roster[0].email === 'bo@montclair.edu' && gone.length === 1 && gone[0].first === 'Amy', 'bulk removal by either address form, duplicates once; the removed rows are returned');
+}
 // Import with a choice: a preview lists the students not in the file; the ones the instructor keeps stay unchanged.
 {
   const k = sv.newClass('Keep test', T0);
