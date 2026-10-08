@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Competency self-assessment</title>
+  <title>Career skills self-assessment</title>
   <script src="https://accounts.google.com/gsi/client" async></script>
   <script src="config.js"></script>
   <style>
@@ -24,26 +24,13 @@
     .banner.ok { background: #e8f5ec; color: var(--ok); border: 1px solid #b9dfc4; }
     .banner.note { background: #eef4fb; color: var(--ink); border: 1px solid #c9dbf0; }
     .standby { padding: 22px 16px; border-radius: 12px; background: #f0f2f5; color: var(--muted); text-align: center; font-size: 18px; margin-top: 16px; }
-    .levels { display: grid; gap: 8px; }
-    .opt { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border: 2px solid var(--line); border-radius: 10px;
-           background: #fff; cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%; }
-    .opt:hover { border-color: #a9b8c8; }
-    /* The marker column has one width for 1 to 4 and N/A, so every description starts at the same place. */
-    .opt .mk { flex: none; width: 44px; text-align: center; }
-    .opt .n { display: inline-flex; min-width: 30px; height: 30px; padding: 0 5px; border-radius: 15px; border: 2px solid var(--line);
-              align-items: center; justify-content: center; font-size: 15px; font-weight: 700; color: var(--muted); white-space: nowrap; }
-    .opt .t { padding-top: 3px; }
-    .opt .t b { font-weight: 700; color: var(--ink); }
-    .opt.on { border-color: var(--accent); background: #e7f0fb; }
-    .opt.on .n { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .opt.on .t b { color: var(--accent); }
     .code { display: block; width: 180px; margin: 0 auto 14px; padding: 10px; font-size: 32px; letter-spacing: 10px; text-align: center;
             border: 2px solid var(--line); border-radius: 10px; font-family: inherit; }
     .codelabel { text-align: center; margin-bottom: 12px; }
     .item { padding-top: 2px; scroll-margin-top: 16px; }
-    .item.missing h3, .item.missing .stmt { color: var(--warn); }
-    .item.missing .opt, .item.missing .big { border-color: #f3c1bc; }
-    /* version 2: the statement, then the question at the left of five big rounded buttons with the scale words inside */
+    .item.missing .stmt { color: var(--warn); }
+    .item.missing .big { border-color: #f3c1bc; }
+    /* the statement, then five big rounded buttons with the scale words inside */
     .stmt { font-size: 17px; font-weight: 600; margin: 16px 0 8px; }
     .scale { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
     .scale .btns { flex: 1 1 340px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
@@ -99,7 +86,7 @@
   var TZ = 'America/New_York';
   var conf = null, token = '', S = null, flash = '', timer = null;
   var roundId = '';         // the round being answered
-  var draft = {};           // its answers as the student picks them: {itemId: 1..4 or 'na'}
+  var draft = {};           // its answers as the student picks them: {itemId: 1..5}
   var saving = false, dirty = false, saveTimer = null, savedAt = '', saveError = '', showMissing = false, done = '';
   // The token is kept in localStorage: the Worker's session token (sent after a Google sign-in) lasts months. "Sign out" deletes it.
   try { token = localStorage.getItem(TOKEN_KEY) || ''; } catch (e) {}
@@ -302,7 +289,7 @@
                    (!classKey && c.classes.length === 1 ? c.classes[0] : null);
       if (!chosen) {
         app.innerHTML = '';
-        app.appendChild(el('h1', { text: 'Competency self-assessment' }));
+        app.appendChild(el('h1', { text: 'Career skills self-assessment' }));
         if (classKey) app.appendChild(el('div', { class: 'banner err', text: 'This link does not match any class. Check the link your instructor posted.' }));
         else if (!c.classes.length) app.appendChild(el('div', { class: 'banner err', text: 'No class is configured yet.' }));
         else app.appendChild(el('p', { text: 'Choose your class:' }));
@@ -373,7 +360,7 @@
       });
       app.appendChild(picks);
     }
-    app.appendChild(el('h2', { style: 'margin-top:14px', text: (S.heading || 'Competency self-assessment') + ': ' + r.name.toLowerCase() }));
+    app.appendChild(el('h2', { style: 'margin-top:14px', text: S.heading + ': ' + r.name.toLowerCase() }));
     if (done) app.appendChild(el('div', { class: 'banner ok', text: done }));
     if (S.needCode && !r.started) {
       bar.hidden = true;
@@ -384,36 +371,24 @@
     if (r.submitted) {
       app.appendChild(el('div', { class: 'banner note', text: 'You submitted this survey on ' + when(r.submitted) + '. You can change answers and submit again'
         + (r.closes ? ' until ' + when(r.closes) + '.' : ' while the survey is open.') }));
-    } else if (S.version === 2) {
-      // version 2: the round's opening text, the instruction sentence, then how saving works
+    } else {
+      // the round's opening text, the instruction sentence, then how saving works
       if (r.intro) app.appendChild(el('p', { text: r.intro }));
       app.appendChild(el('p', { text: S.instruction + ' ' + finish }));
-    } else {
-      app.appendChild(el('p', {}, 'For each item, choose the description that fits you best. Choose N/A when you have not yet learned or applied it, or do not have enough information to assess yourself. ' + finish));
     }
 
     S.competencies.forEach(function (c, ci) {
-      // version 2: the heading is the block's name in bold, then the rating instruction in normal weight
-      var head = S.version === 2 && S.prompt ? el('h2', { class: 'ask' }, el('b', { text: c.name }), ': ' + S.prompt) : el('h2', { text: c.name });
-      var card = el('div', { class: 'card ' + (ci % 2 ? 'compB' : 'compA') }, head, c.definition ? el('p', { class: 'muted', text: c.definition }) : null);
+      // the heading is the block's name in bold, then the rating instruction in normal weight
+      var head = el('h2', { class: 'ask' }, el('b', { text: c.name }), ': ' + S.prompt);
+      var card = el('div', { class: 'card ' + (ci % 2 ? 'compB' : 'compA') }, head);
       c.dims.forEach(function (d) {
         var id = c.code + '.' + d.code;
         var box = el('div', { class: 'item' + (showMissing && !(id in draft) ? ' missing' : ''), id: 'item-' + id });
-        if (S.version === 2) {
-          // the statement, then five big buttons with the scale words inside
-          box.appendChild(el('p', { class: 'stmt', text: d.text }));
-          var btns = el('div', { class: 'btns', role: 'group', 'aria-label': c.name + ': ' + S.prompt });
-          S.levels.forEach(function (t, k) { btns.appendChild(bigOption(id, k + 1, t)); });
-          box.appendChild(el('div', { class: 'scale' }, btns));
-        } else {
-          box.appendChild(el('h3', { text: d.name }));
-          var list = el('div', { class: 'levels' });
-          d.levels.forEach(function (t, k) {
-            list.appendChild(option(id, k + 1, String(k + 1), S.levels[k], t));
-          });
-          list.appendChild(option(id, 'na', 'N/A', 'Not applicable', S.naText));
-          box.appendChild(list);
-        }
+        // the statement, then five big buttons with the scale words inside
+        box.appendChild(el('p', { class: 'stmt', text: d.text }));
+        var btns = el('div', { class: 'btns', role: 'group', 'aria-label': c.name + ': ' + S.prompt });
+        S.levels.forEach(function (t, k) { btns.appendChild(bigOption(id, k + 1, t)); });
+        box.appendChild(el('div', { class: 'scale' }, btns));
         card.appendChild(box);
       });
       app.appendChild(card);
@@ -421,14 +396,7 @@
     renderBar();
   }
 
-  /** Version 1: one answer button with its number, level name, and description. */
-  function option(id, value, mark, label, text) {
-    return el('button', { type: 'button', class: 'opt' + (String(draft[id]) === String(value) ? ' on' : ''), 'data-v': String(value),
-                          on: { click: function () { choose(id, value); } } },
-      el('span', { class: 'mk' }, el('span', { class: 'n', text: mark })), el('span', { class: 't' }, el('b', { text: label + ': ' }), text));
-  }
-
-  /** Version 2: one big button with the scale word inside. */
+  /** One big button with the scale word inside. */
   function bigOption(id, value, label) {
     return el('button', { type: 'button', class: 'big' + (String(draft[id]) === String(value) ? ' on' : ''), 'data-v': String(value), text: label,
                           on: { click: function () { choose(id, value); } } });

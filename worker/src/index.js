@@ -14,7 +14,7 @@
 import { canonEmail } from './roster.js';
 import * as sv from './survey.js';
 import { report } from './report.js';
-import { ALL_COMPETENCIES, ALL_ITEMS, VERSIONS } from './items.js';
+import { COMPETENCIES, ITEMS, LEVELS } from './items.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -199,9 +199,9 @@ async function studentCall(env, real, action, key, args) {
       if (s.code && !prev) throw new Error('Type the session code first.');
       if (action === 'save' && prev && prev.submitted) throw new Error('Your answers are submitted. Change them with "Submit changes".');
       if (action === 'submit') {
-        const left = sv.missing(s, answers), naNote = sv.version(s).na ? ' N/A counts as an answer.' : '';
-        if (left.length) throw new Error(left.length === 1 ? 'One item has no answer: ' + left[0].dimName + '.' + naNote
-          : left.length + ' items have no answer.' + naNote);
+        const left = sv.missing(s, answers);
+        if (left.length) throw new Error(left.length === 1 ? 'One item has no answer: ' + left[0].dimName + '.'
+          : left.length + ' items have no answer.');
       }
       // Answers to competencies turned off since they were given are kept.
       const old = prev ? JSON.parse(prev.answers || '{}') : {};
@@ -328,12 +328,12 @@ async function adminDo(env, real, who, action, key, args) {
     await writeClass(env, key, s);
     logs.push(['remove students', rows.length + ' students: ' + rows.map(r => sv.fullName(r) + ' (' + r.email + ')').join(', ')]);
   } else if (action === 'saveSettings') {
-    const before = JSON.stringify({ title: s.title, version: s.version, off: s.off, code: s.code, codeSec: s.codeSec });
-    sv.ADMIN.saveSettings(s, args[0], now);
+    const before = JSON.stringify({ title: s.title, off: s.off, code: s.code, codeSec: s.codeSec });
+    sv.ADMIN.saveSettings(s, args[0]);
     await writeClass(env, key, s);
-    const after = JSON.stringify({ title: s.title, version: s.version, off: s.off, code: s.code, codeSec: s.codeSec });
-    const offNames = sv.version(s).competencies.filter(c => s.off.indexOf(c.code) !== -1).map(c => c.name).join(', ') || 'none';
-    if (after !== before) logs.push(['save settings', 'title: ' + s.title + '; survey version ' + s.version + '; turned off: ' + offNames
+    const after = JSON.stringify({ title: s.title, off: s.off, code: s.code, codeSec: s.codeSec });
+    const offNames = COMPETENCIES.filter(c => s.off.indexOf(c.code) !== -1).map(c => c.name).join(', ') || 'none';
+    if (after !== before) logs.push(['save settings', 'title: ' + s.title + '; turned off: ' + offNames
       + '; session code: ' + (s.code ? 'required' : 'not required') + ', changes every ' + sv.codeSec(s) + ' seconds']);
   } else if (action === 'openRound') {
     sv.ADMIN.openRound(s, args[0], args[1], now);
@@ -368,9 +368,7 @@ async function adminDo(env, real, who, action, key, args) {
     const time = new Date().toISOString();
     await env.DB.batch(logs.map(l => env.DB.prepare(LOG_SQL).bind(time, key, who, l[0], String(l[1]).slice(0, 2000))));
   }
-  // secret and now let the page compute the session code shown with the QR code (sv.sessionCode). The competencies
-  // and items of both survey versions are sent (each marked with its version); the page shows the class's version.
-  return { state: shownState(s), secret: s.secret, responses: await allRows(), competencies: ALL_COMPETENCIES, items: ALL_ITEMS,
-           versions: VERSIONS.map(v => ({ n: v.n, name: v.name, summary: v.summary, levels: v.levels, na: v.na })), defaultVersion: sv.DEFAULT_VERSION,
+  // secret and now let the page compute the session code shown with the QR code (sv.sessionCode).
+  return { state: shownState(s), secret: s.secret, responses: await allRows(), competencies: COMPETENCIES, items: ITEMS, levels: LEVELS,
            open: s.rounds.filter(r => sv.isOpen(r, now)).map(r => r.id), now: new Date(now).toISOString() };
 }

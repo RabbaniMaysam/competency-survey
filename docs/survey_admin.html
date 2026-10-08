@@ -280,18 +280,14 @@
   function fullName(r) { return (r.first + ' ' + r.last).trim(); }
   function studentLink() { return location.href.replace(/survey_admin\.html.*$/, '') + 'survey.html?c=' + encodeURIComponent(cur); }
   function button(label, cls, fn) { return el('button', { text: label, class: cls, disabled: busy, on: { click: fn } }); }
-  // The class's survey version (1 or 2, Settings): D.competencies and D.items hold both versions, each marked with its version.
-  function ver() { return D.state.version || 1; }
-  function verInfo(n) { return D.versions.filter(function (v) { return v.n === (n || ver()); })[0] || D.versions[0]; }
-  function compsOf(n) { return D.competencies.filter(function (c) { return c.version === n; }); }
-  function comps() { return compsOf(ver()); }
+  function comps() { return D.competencies; }
   function isOn(code) { return D.state.off.indexOf(code) === -1; }
-  /** Whether an item is in the class's survey: of the class's version, and its competency turned on. */
-  function inSurvey(i) { return i.version === ver() && isOn(i.comp); }
+  /** Whether an item is in the class's survey: its competency turned on. */
+  function inSurvey(i) { return isOn(i.comp); }
   function activeItems() { return D.items.filter(inSurvey); }
   function responsesOf(round) { return D.responses.filter(function (x) { return x.round === round; }); }
   function answeredCount(x) { return activeItems().filter(function (i) { return i.id in x.answers; }).length; }
-  function levelText(item, v) { return v === 'na' ? 'N/A' : v ? v + ' ' + verInfo(item.version).levels[v - 1] : ''; }
+  function levelText(v) { return v ? v + ' ' + (D.levels[v - 1] || '') : ''; }
   /** A value for a datetime-local input: the given time in this computer's time zone. */
   function localInput(ms) { var d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); }
 
@@ -409,10 +405,9 @@
 
   // Unsaved edits on the Settings tab: kept in settingsDraft across redraws, and checked before the tab, class, or sign-in changes.
   var settingsDraft = null;
-  /** The form's values: off holds only the codes of the form's version (the Worker keeps the other version's). */
+  /** The form's values. */
   function settingsOf(S) {
-    var n = S.version || 1, mine = compsOf(n).map(function (c) { return c.code; });
-    return { title: S.title, version: String(n), off: S.off.filter(function (c) { return mine.indexOf(c) !== -1; }), code: !!S.code, codeSec: String(S.codeSec > 0 ? S.codeSec : 30) };
+    return { title: S.title, off: S.off.slice(), code: !!S.code, codeSec: String(S.codeSec > 0 ? S.codeSec : 30) };
   }
   function settingsDirty() { return !!(settingsDraft && D && JSON.stringify(settingsDraft) !== JSON.stringify(settingsOf(D.state))); }
   /** Resolves true when it is fine to leave the Settings form (nothing to save, saved, or discarded), false to stay. */
@@ -607,7 +602,7 @@
   function overview(card) {
     var S = D.state, n = S.roster.length;
     var on = comps().filter(function (c) { return isOn(c.code); }), offNames = comps().filter(function (c) { return !isOn(c.code); }).map(function (c) { return c.name; });
-    card.appendChild(el('p', {}, S.roster.length + ' students on the roster. The class uses ' + verInfo().name.toLowerCase() + ' of the survey: ' + activeItems().length + ' items in ' + on.length + ' competencies'
+    card.appendChild(el('p', {}, S.roster.length + ' students on the roster. The survey has ' + activeItems().length + ' items in ' + on.length + ' competencies'
       + (offNames.length ? ' (turned off: ' + offNames.join(', ') + '; see Settings).' : ' (see Settings).')));
     if (!n) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'The roster is empty: import it on the Roster tab before opening a survey. Only students on the roster can answer.' }));
     S.rounds.forEach(function (r) {
@@ -657,8 +652,7 @@
       }
       card.appendChild(box);
     });
-    var V = verInfo();
-    card.appendChild(el('p', { class: 'muted', style: 'margin-top:12px', text: 'Students answer each item with one of the ' + V.levels.length + ' levels' + (V.na ? ' or N/A' : '') + '. Answers are saved as they go; the survey counts as submitted once every item has an answer and the student presses Submit. While the survey is open, a student can change answers and submit again; the first submission time is kept.' }));
+    card.appendChild(el('p', { class: 'muted', style: 'margin-top:12px', text: 'Students answer each item with one of the ' + D.levels.length + ' levels. Answers are saved as they go; the survey counts as submitted once every item has an answer and the student presses Submit. While the survey is open, a student can change answers and submit again; the first submission time is kept.' }));
   }
 
   // ---- Responses: one row per student, the status of each round, and each student's answers
@@ -670,9 +664,8 @@
     D.responses.forEach(function (x) {
       if (!people.some(function (p) { return p.email === x.email; })) people.push({ r: null, email: x.email, gone: true });
     });
-    var V = verInfo();
     card.appendChild(el('div', { class: 'row' }, button('Download CSV', 'plain', function () { downloadAnswers(people, byKey); }),
-      el('span', { class: 'muted', text: 'One row per student and survey: the status, the times, and the answer to each item (1 to ' + V.levels.length + (V.na ? ', or NA' : '') + '; blank when not answered). Answers to the other survey version, if any, have their own columns.' })));
+      el('span', { class: 'muted', text: 'One row per student and survey: the status, the times, and the answer to each item (1 to ' + D.levels.length + '; blank when not answered).' })));
     if (!people.length) { card.appendChild(el('p', { class: 'muted', text: 'No students on the roster yet.' })); return; }
     var head = el('tr', {}, el('th', { text: 'Student' }), el('th', { text: 'Email' }));
     S.rounds.forEach(function (r) { head.appendChild(el('th', { text: r.name })); });
@@ -709,13 +702,12 @@
       }) : null));
     });
     var t = el('table', { style: 'width:auto' }, head);
-    // Every item of the class's survey, plus any item with an answer (a competency turned off, or the other version).
+    // Every item of the class's survey, plus any item with an answer to a competency turned off.
     D.items.forEach(function (i) {
       var vals = S.rounds.map(function (r) { var x = byKey[r.id + '|' + p.email]; return x ? x.answers[i.id] : undefined; });
       if (!inSurvey(i) && vals.every(function (v) { return v === undefined; })) return;
-      var tag = inSurvey(i) ? '' : i.version !== ver() ? ' (version ' + i.version + ')' : ' (off)';
-      var tr = el('tr', {}, el('td', { text: i.compName + tag }), el('td', { text: i.dimName }));
-      vals.forEach(function (v) { tr.appendChild(el('td', { text: levelText(i, v) })); });
+      var tr = el('tr', {}, el('td', { text: i.compName + (inSurvey(i) ? '' : ' (off)') }), el('td', { text: i.dimName }));
+      vals.forEach(function (v) { tr.appendChild(el('td', { text: levelText(v) })); });
       t.appendChild(tr);
     });
     t.appendChild(foot);
@@ -724,10 +716,10 @@
 
   function downloadAnswers(people, byKey) {
     var S = D.state;
-    // Every item of the class's survey, plus any item with an answer anywhere (a competency turned off, or the other version), in survey order.
+    // Every item of the class's survey, plus any item with an answer anywhere (a competency turned off), in survey order.
     var cols = D.items.filter(function (i) { return inSurvey(i) || D.responses.some(function (x) { return i.id in x.answers; }); });
     var head = ['Last name', 'First name', 'Email', 'On roster', 'Survey', 'Status', 'Submitted', 'Last change']
-      .concat(cols.map(function (i) { return i.compName + ': ' + i.dimName + (i.version !== ver() ? ' (version ' + i.version + ')' : ''); }));
+      .concat(cols.map(function (i) { return i.compName + ': ' + i.dimName; }));
     var rows = [head];
     people.forEach(function (p) {
       S.rounds.forEach(function (r) {
@@ -735,7 +727,7 @@
         if (!x && p.gone) return;
         rows.push([p.r ? p.r.last : '', p.r ? p.r.first : '', p.email, p.gone ? 'no' : 'yes', r.name,
           !x ? 'not started' : x.submitted ? 'submitted' : 'started', x && x.submitted ? isoFull(x.submitted) : '', x ? isoFull(x.saved) : '']
-          .concat(cols.map(function (i) { var v = x ? x.answers[i.id] : undefined; return v === undefined ? '' : v === 'na' ? 'NA' : v; })));
+          .concat(cols.map(function (i) { var v = x ? x.answers[i.id] : undefined; return v === undefined ? '' : v; })));
       });
     });
     download('survey_' + cur + '_' + today() + '.csv', rows);
@@ -815,10 +807,10 @@
   // ---- figures: each chart is a list of shapes (rect, circle, line, text) in a 720 px wide frame. The page shows it
   // as SVG (chartSvg); the PDF and Word files get it drawn on a canvas at three times the size (chartPng).
   var CH = { w: 720, label: 250, right: 64, row: 22, group: 28, font: 12 }, FONT = 'Arial, Helvetica, sans-serif';
-  // one blue per level, light to dark, for a scale of L levels (version 1: 4, version 2: 5)
-  var LEVEL_PALETTES = { 4: ['#d3e2f4', '#93b9e5', '#4d88d0', '#0b5cad'], 5: ['#d3e2f4', '#a9c6ea', '#78a6dc', '#4d88d0', '#0b5cad'] };
-  function levelColors(L) { return LEVEL_PALETTES[L] || LEVEL_PALETTES[4]; }
-  var NA_COLOR = '#c9ced4', START_COLOR = '#9fbfe6', END_COLOR = '#0b5cad';
+  // one blue per level, light to dark, for the five levels
+  var LEVEL_PALETTES = { 5: ['#d3e2f4', '#a9c6ea', '#78a6dc', '#4d88d0', '#0b5cad'] };
+  function levelColors(L) { return LEVEL_PALETTES[L] || LEVEL_PALETTES[5]; }
+  var START_COLOR = '#9fbfe6', END_COLOR = '#0b5cad';
   var UP_COLOR = '#2e9e4f', SAME_COLOR = '#d5d9de', DOWN_COLOR = '#c9372c', INK = '#1f2328', MUTED = '#5c6670';
   function darkFill(hex) { var n = parseInt(hex.slice(1), 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) < 150; }
   var rect = function (x, y, w, h, fill, rx) { return { k: 'rect', x: x, y: y, w: w, h: h, fill: fill, rx: rx || 0 }; };
@@ -943,15 +935,14 @@
     var a = R.rounds[0], b = R.rounds[1];
     var sub = view === 'both' ? 'Change from the start to the end of the semester' : (view === 'start' ? a : b).name + ' survey';
     var when = function (r) { return r.openedAt ? r.name + ' survey: opened ' + dateOf(r.openedAt) + (r.closedAt ? ', closed ' + dateOf(r.closedAt) : ', open') + '.' : r.name + ' survey: not opened yet.'; };
-    var blocks = [{ t: 'head', title: R.title, sub: sub, meta: 'Report generated ' + isoFull(R.generated) + '. Survey version ' + R.version + '. ' + when(a) + ' ' + when(b) }];
+    var blocks = [{ t: 'head', title: R.title, sub: sub, meta: 'Report generated ' + isoFull(R.generated) + '. ' + when(a) + ' ' + when(b) }];
     blocks = blocks.concat(view === 'both' ? bothBlocks(R, names) : roundBlocks(R, view, names));
     var outside = R.rounds.filter(function (r) { return r.outside; });
     blocks.push({ t: 'h2', text: 'Notes' });
-    blocks.push({ t: 'p', muted: true, text: 'Survey version ' + R.version + '. Levels: ' + R.levels.map(function (l, k) { return (k + 1) + ' ' + l; }).join(', ') + '. '
-      + (R.na ? 'N/A answers are counted but left out of every mean. A student\'s competency score is the mean of the student\'s non-N/A answers to the competency\'s items, and the student\'s overall score the mean of all the student\'s non-N/A answers; '
-              : 'A student\'s competency score is the mean of the student\'s answers to the competency\'s items, and the student\'s overall score the mean of all the student\'s answers; ')
+    blocks.push({ t: 'p', muted: true, text: 'Levels: ' + R.levels.map(function (l, k) { return (k + 1) + ' ' + l; }).join(', ') + '. '
+      + 'A student\'s competency score is the mean of the student\'s answers to the competency\'s items, and the student\'s overall score the mean of all the student\'s answers; '
       + 'competency and overall means average the students\' scores, item means average the answers. '
-      + '"Start vs end" uses the students who submitted both surveys (for an item, those who answered it at a level in both); p is the two-sided p-value of a paired t-test of the mean change, blank with fewer than two students or no variation. '
+      + '"Start vs end" uses the students who submitted both surveys (for an item, those who answered it in both); p is the two-sided p-value of a paired t-test of the mean change, blank with fewer than two students or no variation. '
       + 'Only submitted surveys of students on the roster count'
       + (outside.length ? '; submitted surveys of students no longer on the roster are left out (' + outside.map(function (r) { return r.name.toLowerCase() + ' ' + r.outside; }).join(', ') + ')' : '') + '.' });
     if (names) blocks.push(scoresSheet(R));
@@ -961,40 +952,37 @@
   function roundBlocks(R, id, names) {
     var r = R.rounds.filter(function (x) { return x.id === id; })[0], o = R.overall[id], comps = R.competencies, items = R.items;
     if (!r.submitted) return [{ t: 'p', text: 'No submitted ' + r.name.toLowerCase() + ' survey yet' + (r.started ? ' (' + r.started + ' started, not submitted).' : '.') }];
-    var L = R.levels.length, na = R.na, answers = o.dist.reduce(sum, 0), levelNames = R.levels.map(function (l, k) { return (k + 1) + ' ' + l; });
+    var L = R.levels.length, levelNames = R.levels.map(function (l, k) { return (k + 1) + ' ' + l; });
     var top = 'level ' + (L - 1) + ' or ' + L;
-    // the distribution shown: the L levels, plus N/A when the version has it
-    var dist = function (d) { return na ? d : d.slice(0, L); };
     var facts = [
       { v: r.submitted + ' of ' + r.roster, l: 'students submitted (' + pct(r.submitted / r.roster) + ')' },
       { v: String(r.started), l: 'started, not submitted' },
       { v: f2(o.mean), l: 'mean level (1 to ' + L + ')' },
       { v: pct(o.applying), l: 'answers at ' + top }];
-    if (na) facts.push({ v: pct(o.na / answers), l: 'N/A answers' });
     var blocks = [{ t: 'facts', items: facts }];
     blocks.push({ t: 'h2', text: 'Competencies' });
     blocks.push({ t: 'figure', chart:barChart([{ label: 'All competencies', value: o.mean, bold: true }].concat(comps.map(function (c) { return { label: c.name, value: c[id].mean }; })), END_COLOR, L),
       caption: 'Mean level by competency, from 1 (' + R.levels[0] + ') to ' + L + ' (' + R.levels[L - 1] + '), over the ' + r.submitted + ' students who submitted.' });
-    blocks.push({ t: 'table', sheet: 'Competencies', head: ['Competency', 'Mean', 'SD', 'Students', 'At ' + top].concat(na ? ['N/A answers'] : []), num: na ? [1, 2, 3, 4, 5] : [1, 2, 3, 4], group: -1, total: true,
-      rows: comps.map(function (c) { return [c.name, c[id].mean, c[id].sd, int(c[id].n), pc(c[id].applying)].concat(na ? [int(c[id].na)] : []); })
-        .concat([['All competencies', o.mean, o.sd, int(o.n), pc(o.applying)].concat(na ? [int(o.na)] : [])]) });
+    blocks.push({ t: 'table', sheet: 'Competencies', head: ['Competency', 'Mean', 'SD', 'Students', 'At ' + top], num: [1, 2, 3, 4], group: -1, total: true,
+      rows: comps.map(function (c) { return [c.name, c[id].mean, c[id].sd, int(c[id].n), pc(c[id].applying)]; })
+        .concat([['All competencies', o.mean, o.sd, int(o.n), pc(o.applying)]]) });
     blocks.push({ t: 'h2', text: 'Items' });
-    blocks.push({ t: 'figure', chart:stackChart(itemRows(items, function (i) { return { label: i.name, parts: dist(i[id].dist) }; }), levelColors(L).concat(na ? [NA_COLOR] : []), levelNames.concat(na ? ['N/A'] : [])),
-      caption: 'Share of the answers at each level, by item (n = answers' + (na ? ', N/A included' : '') + ').' });
-    var levelCols = R.levels.map(function (l, k) { return 'Level ' + (k + 1); }).concat(na ? ['N/A'] : []);
-    var itemHead = ['Competency', 'Item', 'Mean', 'SD', na ? 'Answers at a level' : 'Answers'].concat(levelCols);
+    blocks.push({ t: 'figure', chart:stackChart(itemRows(items, function (i) { return { label: i.name, parts: i[id].dist }; }), levelColors(L), levelNames),
+      caption: 'Share of the answers at each level, by item (n = answers).' });
+    var levelCols = R.levels.map(function (l, k) { return 'Level ' + (k + 1); });
+    var itemHead = ['Competency', 'Item', 'Mean', 'SD', 'Answers'].concat(levelCols);
     blocks.push({ t: 'table', sheet: 'Items', head: itemHead, num: itemHead.map(function (h, k) { return k; }).slice(2), group: 0,
-      rows: items.map(function (i) { return [i.compName, i.name, i[id].mean, i[id].sd, int(i[id].n)].concat(dist(i[id].dist).map(int)); }) });
+      rows: items.map(function (i) { return [i.compName, i.name, i[id].mean, i[id].sd, int(i[id].n)].concat(i[id].dist.map(int)); }) });
     if (names) {
       blocks.push({ t: 'h2', text: 'Students' });
-      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', 'Mean level'].concat(na ? ['N/A answers'] : []).concat(['Submitted']), num: na ? [2, 3] : [2], group: -1,
-        rows: R.students.filter(function (x) { return x[id]; }).map(function (x) { return [x.last + ', ' + x.first, x.email, x[id].overall].concat(na ? [int(x[id].na)] : []).concat([isoClock(x[id].submitted)]); }) });
+      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', 'Mean level', 'Submitted'], num: [2], group: -1,
+        rows: R.students.filter(function (x) { return x[id]; }).map(function (x) { return [x.last + ', ' + x.first, x.email, x[id].overall, isoClock(x[id].submitted)]; }) });
     }
     return blocks;
   }
 
   function bothBlocks(R, names) {
-    var a = R.rounds[0], b = R.rounds[1], o = R.overall.change, P = R.pairs, comps = R.competencies, items = R.items, L = R.levels.length, na = R.na;
+    var a = R.rounds[0], b = R.rounds[1], o = R.overall.change, P = R.pairs, comps = R.competencies, items = R.items, L = R.levels.length;
     if (!P.both) return [{ t: 'p', text: 'No student has submitted both surveys yet (' + a.name.toLowerCase() + ': ' + a.submitted + ' submitted; ' + b.name.toLowerCase() + ': ' + b.submitted + ').' }];
     var changeRow = function (name, c) { return [name, c.before, c.after, sg(c.mean), c.sd, int(c.n), pv(c.p), int(c.up), int(c.same), int(c.down)]; };
     var blocks = [{ t: 'facts', items: [
@@ -1012,29 +1000,28 @@
       caption: 'Share of students whose competency score rose, stayed the same, or fell between the two surveys.' });
     blocks.push({ t: 'h2', text: 'Items' });
     blocks.push({ t: 'figure', chart:dumbbellChart(itemRows(items, function (i) { return { label: i.name, a: i.change.before, b: i.change.after }; }), [a.name, b.name], L),
-      caption: 'Mean level at the start and at the end of the semester, by item, for the students who answered the item' + (na ? ' at a level' : '') + ' in both surveys.' });
+      caption: 'Mean level at the start and at the end of the semester, by item, for the students who answered the item in both surveys.' });
     blocks.push({ t: 'table', sheet: 'Items', head: ['Competency', 'Item', a.name, b.name, 'Change', 'SD of change', 'Students', 'p', 'Rose', 'Same', 'Fell'], num: [2, 3, 4, 5, 6, 7, 8, 9, 10], group: 0,
       rows: items.map(function (i) { return [i.compName].concat(changeRow(i.name, i.change)); }) });
     if (names) {
       blocks.push({ t: 'h2', text: 'Students' });
-      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', a.name, b.name, 'Change'].concat(na ? ['N/A answers (start / end)'] : []), num: [2, 3, 4, 5], group: -1,
-        rows: R.students.map(function (x) { return [x.last + ', ' + x.first, x.email, x.start ? x.start.overall : null, x.end ? x.end.overall : null, sg(x.change)]
-          .concat(na ? [(x.start ? x.start.na : '-') + ' / ' + (x.end ? x.end.na : '-')] : []); }) });
+      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', a.name, b.name, 'Change'], num: [2, 3, 4], group: -1,
+        rows: R.students.map(function (x) { return [x.last + ', ' + x.first, x.email, x.start ? x.start.overall : null, x.end ? x.end.overall : null, sg(x.change)]; }) });
     }
     return blocks;
   }
 
   /** For Excel only: one row per student and survey with the overall and every competency score. */
   function scoresSheet(R) {
-    var rows = [], na = R.na, first = na ? 7 : 6;
+    var rows = [], first = 6;
     R.students.forEach(function (x) {
       R.rounds.forEach(function (r) {
         if (!x[r.id]) return;
-        rows.push([x.last, x.first, x.email, r.name, isoFull(x[r.id].submitted), x[r.id].overall].concat(na ? [int(x[r.id].na)] : []).concat(R.competencies.map(function (c) { return x[r.id].comps[c.code]; })));
+        rows.push([x.last, x.first, x.email, r.name, isoFull(x[r.id].submitted), x[r.id].overall].concat(R.competencies.map(function (c) { return x[r.id].comps[c.code]; })));
       });
     });
-    return { t: 'table', xlsxOnly: true, sheet: 'Student scores', head: ['Last name', 'First name', 'Email', 'Survey', 'Submitted', 'Mean level'].concat(na ? ['N/A answers'] : []).concat(R.competencies.map(function (c) { return c.name; })),
-             num: (na ? [5, 6] : [5]).concat(R.competencies.map(function (c, k) { return first + k; })), group: -1, rows: rows };
+    return { t: 'table', xlsxOnly: true, sheet: 'Student scores', head: ['Last name', 'First name', 'Email', 'Survey', 'Submitted', 'Mean level'].concat(R.competencies.map(function (c) { return c.name; })),
+             num: [5].concat(R.competencies.map(function (c, k) { return first + k; })), group: -1, rows: rows };
   }
 
   // ---- the blocks on the page
@@ -1242,55 +1229,37 @@
       borders: { top: edge, bottom: edge, left: edge, right: edge, insideHorizontal: edge, insideVertical: edge } });
   }
 
-  // ---- Settings: title, survey version, which competencies the survey includes, full download, delete
+  // ---- Settings: title, session code, which competencies the survey includes, full download, delete
   function settings(card) {
     var S = D.state, v = settingsDraft || settingsOf(S);
-    var anyOpen = D.open.length > 0, formVer = Number(v.version) || 1;
+    var anyOpen = D.open.length > 0;
     var title = el('input', { type: 'text', value: v.title, size: 40 });
     var note = el('span', { class: 'muted' });
-    // the competency checkboxes are those of the version chosen in the form
-    var boxes = compsOf(formVer).map(function (c) {
+    var boxes = comps().map(function (c) {
       var cb = el('input', { type: 'checkbox' }); cb.checked = v.off.indexOf(c.code) === -1;
       return { c: c, cb: cb };
     });
-    var verRadios = D.versions.map(function (x) {
-      var rb = el('input', { type: 'radio', name: 'survey-version', value: String(x.n) }); rb.checked = x.n === formVer;
-      return { x: x, rb: rb };
-    });
     var codeCb = el('input', { type: 'checkbox' }); codeCb.checked = !!v.code;
     var codeSecIn = el('input', { type: 'number', min: 3, max: 300, step: 1, value: v.codeSec, style: 'width:70px' });
-    var form = function () { return { title: title.value, version: String(formVer), off: boxes.filter(function (b) { return !b.cb.checked; }).map(function (b) { return b.c.code; }), code: codeCb.checked, codeSec: codeSecIn.value }; };
+    var form = function () { return { title: title.value, off: boxes.filter(function (b) { return !b.cb.checked; }).map(function (b) { return b.c.code; }), code: codeCb.checked, codeSec: codeSecIn.value }; };
     var edited = function () { settingsDraft = form(); note.textContent = settingsDirty() ? 'Unsaved changes.' : ''; };
     title.addEventListener('input', edited);
     codeCb.addEventListener('change', edited);
     codeSecIn.addEventListener('input', edited);
     boxes.forEach(function (b) { b.cb.addEventListener('change', edited); });
-    // Choosing a version redraws the form with that version's competencies (the class's stored off list for it).
-    verRadios.forEach(function (o) {
-      o.rb.addEventListener('change', function () {
-        var d = form(), mine = compsOf(o.x.n).map(function (c) { return c.code; });
-        d.version = String(o.x.n); d.off = S.off.filter(function (c) { return mine.indexOf(c) !== -1; });
-        settingsDraft = d; render();
-      });
-    });
 
     card.appendChild(el('h2', { text: 'Class' }));
     card.appendChild(el('div', { class: 'row' }, el('label', {}, 'Title ', title)));
-    card.appendChild(el('h2', { text: 'Survey version', style: 'margin-top:16px' }));
-    card.appendChild(el('p', { class: 'muted', text: 'Which survey the students answer, in both rounds. Change it before opening a survey: it cannot change while a survey is open. Answers given to the other version are kept and listed on the Responses tab, but the report counts only the answers to the version in use.' }));
-    verRadios.forEach(function (o) {
-      card.appendChild(el('label', { class: 'comp' }, o.rb, el('span', {}, el('b', { text: o.x.name + (o.x.n === (D.defaultVersion || 2) ? ' (default for a new class)' : '') }), el('br'), el('span', { class: 'muted', text: o.x.summary }))));
-    });
-    card.appendChild(el('label', { class: 'comp' }, codeCb, el('span', {}, el('b', { text: 'Students type the session code to start a survey' }), el('br'),
+    card.appendChild(el('label', { class: 'comp', style: 'margin-top:12px' }, codeCb, el('span', {}, el('b', { text: 'Students type the session code to start a survey' }), el('br'),
       el('span', { class: 'muted', text: 'The 4-digit code is shown with the QR code (QR code tab) and changes at the interval below, so a student starts the survey in the room. It is typed once per survey; after that the student can finish and change answers anywhere while the survey is open. A code is accepted for one to two intervals after it appears (the current code and the previous one); a wrong code can be retried. A longer interval is easier to type and easier to relay to someone outside the room.' }))));
     card.appendChild(el('div', { class: 'row' }, el('label', {}, 'The session code changes every ', codeSecIn, ' seconds'),
       el('span', { class: 'muted', text: '3 to 300; 30 by default' })));
-    card.appendChild(el('h2', { text: 'Competencies in the survey' + (formVer !== ver() ? ' (' + verInfo(formVer).name.toLowerCase() + ')' : ''), style: 'margin-top:16px' }));
-    card.appendChild(el('p', { class: 'muted', text: 'Unchecked competencies are left out of the survey for both rounds.' + (formVer === 1 ? ' Equity & Inclusion is off by default.' : '') + ' Turning a competency off keeps the answers students gave to it; turning it on adds its items, which students who have submitted then answer by submitting again.' }));
+    card.appendChild(el('h2', { text: 'Competencies in the survey', style: 'margin-top:16px' }));
+    card.appendChild(el('p', { class: 'muted', text: 'Unchecked competencies are left out of the survey for both rounds. Turning a competency off keeps the answers students gave to it; turning it on adds its items, which students who have submitted then answer by submitting again.' }));
     if (anyOpen) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'A survey is open: a change applies to students the next time their page loads. Change the competencies before opening a survey where possible.' }));
     boxes.forEach(function (b) {
-      card.appendChild(el('label', { class: 'comp' }, b.cb, el('span', {}, el('b', { text: b.c.name }), ' (' + b.c.dims.length + ' items)' + (b.c.offByDefault ? ', off by default' : ''),
-        el('br'), el('span', { class: 'muted', text: b.c.dims.map(function (d) { return d.text || d.name; }).join(' · ') }))));
+      card.appendChild(el('label', { class: 'comp' }, b.cb, el('span', {}, el('b', { text: b.c.name }), ' (' + b.c.dims.length + ' items)',
+        el('br'), el('span', { class: 'muted', text: b.c.dims.map(function (d) { return d.text; }).join(' · ') }))));
     });
     card.appendChild(el('div', { class: 'row', style: 'margin-top:10px' }, button('Save', '', function () {
       edited();
@@ -1299,15 +1268,9 @@
       var was = settingsOf(S), now = settingsDraft, lines = [];
       var names = function (codes) { return D.competencies.filter(function (c) { return codes.indexOf(c.code) !== -1; }).map(function (c) { return c.name; }).join(', '); };
       if (now.title.trim() !== was.title) lines.push('Title: ' + now.title.trim() + '.');
-      if (now.version !== was.version) {
-        var hasAnswers = D.responses.some(function (x) { return Object.keys(x.answers).length; });
-        lines.push('Survey version: ' + verInfo(Number(now.version)).name.toLowerCase() + ' (' + verInfo(Number(now.version)).summary + ')' + (hasAnswers ? ' Answers given to ' + verInfo().name.toLowerCase() + ' are kept but left out of the report; students who submitted it answer the new version by submitting again.' : ''));
-        if (now.off.length) lines.push('Turned off in it: ' + names(now.off) + '.');
-      } else {
-        var turnOn = was.off.filter(function (c) { return now.off.indexOf(c) === -1; }), turnOff = now.off.filter(function (c) { return was.off.indexOf(c) === -1; });
-        if (turnOn.length) lines.push('Turned on: ' + names(turnOn) + '. Students who submitted answer the new items by submitting again.');
-        if (turnOff.length) lines.push('Turned off: ' + names(turnOff) + '. Answers already given to them are kept.');
-      }
+      var turnOn = was.off.filter(function (c) { return now.off.indexOf(c) === -1; }), turnOff = now.off.filter(function (c) { return was.off.indexOf(c) === -1; });
+      if (turnOn.length) lines.push('Turned on: ' + names(turnOn) + '. Students who submitted answer the new items by submitting again.');
+      if (turnOff.length) lines.push('Turned off: ' + names(turnOff) + '. Answers already given to them are kept.');
       if (now.code !== was.code) lines.push(now.code ? 'Students type the session code to start a survey.' : 'Students start a survey without the session code.');
       if (String(now.codeSec).trim() !== was.codeSec) lines.push('The session code changes every ' + String(now.codeSec).trim() + ' seconds.');
       if (anyOpen) lines.push('A survey is open: students see the change the next time their page loads.');

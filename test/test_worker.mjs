@@ -65,10 +65,9 @@ ok(r.ok && r.data.key === K && (await (await fetch(API + '/config')).json()).cla
 ok(/exists/.test((await adm('createClass', [K, 'again'], '')).error), 'duplicate class key refused');
 ok(/lowercase/.test((await adm('createClass', ['Bad Key!', 'x'], '')).error), 'bad class key refused');
 r = await adm('get');
-ok(r.ok && r.data.state.off.join() === 'equity' && r.data.state.version === 2 && r.data.defaultVersion === 2 && r.data.items.length === 43 && r.data.competencies.length === 14
-  && r.data.versions.length === 2 && r.data.versions[0].levels.length === 4 && r.data.versions[1].levels.length === 5 && r.data.open.length === 0, 'new class: version 2, equity off, nothing open; both versions\' items sent');
-r = await adm('saveSettings', [{ version: '1' }]);  // the checks up to the version 2 section use version 1
-ok(r.ok && r.data.state.version === 1, 'version 1 chosen for the class');
+ok(r.ok && r.data.state.off.length === 0 && !('version' in r.data.state) && !('versions' in r.data) && !('defaultVersion' in r.data) && r.data.items.length === 18
+  && r.data.competencies.length === 6 && r.data.levels.length === 5 && r.data.open.length === 0, 'new class: every competency on, nothing open; 18 items, five levels, no versions');
+ok((await adm('saveSettings', [{ version: '1' }])).ok && !('version' in (await adm('get')).data.state), 'a version sent by an old page is ignored');
 r = await adm('importRoster', ['first,last,email\nF1,L1,' + m(1) + '\nF2,L2,' + m(2) + '\nF3,L3,' + m(3)]);
 ok(r.ok && r.data.state.roster.length === 3, 'roster imported');
 r = await adm('previewRoster', ['first,last,email\nF1,L1,' + m(1) + '\nF2,L2,' + m(2)]);
@@ -94,11 +93,13 @@ await bad('s1.' + Buffer.from(JSON.stringify({ e: 'prof@gmail.com', x: sPayload.
 await bad(sp[0] + '.' + sp[1] + '.' + sp[2].slice(0, -2) + 'AA', 'session token with a bad signature');
 ok(/not an instructor/.test((await post('/admin', { token: sess, class: K, action: 'whoami' })).error), 'a student session cannot use the instructor API');
 
-// the student view: 22 items in 7 competencies, both rounds closed
+// the student view: 18 statements in 6 competencies, five levels, both rounds closed
 r = await stu(1, 'state');
 const items = r.state.competencies.flatMap(c => c.dims.map(d => c.code + '.' + d.code));
-ok(r.state.name === 'F1 L1' && items.length === 22 && !items.some(i => /^equity\./.test(i)) && r.state.rounds.every(x => !x.open) && r.state.levels.length === 4 && r.state.version === 1 && r.state.na === true, 'student sees 22 items, equity left out, both rounds closed');
-ok(/closed/.test((await stu(1, 'save', ['start', { 'career.strengths': 2 }])).error), 'saving refused while closed');
+ok(r.state.name === 'F1 L1' && items.length === 18 && r.state.competencies.length === 6 && r.state.rounds.every(x => !x.open) && r.state.levels.length === 5
+  && !('version' in r.state) && !('na' in r.state) && r.state.heading === 'Career skills self-assessment' && r.state.prompt && r.state.instruction
+  && r.state.rounds[0].intro && r.state.rounds[1].intro && r.state.competencies.every(c => c.dims.every(d => d.text)), 'student sees 18 statements, five levels, intros; both rounds closed');
+ok(/closed/.test((await stu(1, 'save', ['start', { 'career2.strengths': 2 }])).error), 'saving refused while closed');
 
 // open the start round; draft, submit, change
 r = await adm('openRound', ['start', '']);
@@ -107,7 +108,7 @@ ok(r.ok && r.data.open.join() === 'start' && r.data.state.rounds[0].openedAt, 's
 // session code: required by default, typed once per round
 const secret = r.data.secret;
 ok(r.data.state.code === true && /^[0-9a-f]{32}$/.test(secret) && !('secret' in r.data.state) && Math.abs(Date.parse(r.data.now) - Date.now()) < 5000, 'the secret and the server clock are sent apart from the state');
-ok(/session code first/.test((await stu(1, 'save', ['start', { 'career.strengths': 2 }])).error), 'saving refused before the session code');
+ok(/session code first/.test((await stu(1, 'save', ['start', { 'career2.strengths': 2 }])).error), 'saving refused before the session code');
 r = await stu(1, 'state');
 ok(r.state.needCode === true && r.state.rounds[0].started === false, 'the student page asks for the code');
 const slotNow = sv.codeSlot(Date.now()), good = sv.sessionCode({ secret: secret }, slotNow);
@@ -119,14 +120,16 @@ ok(/closed/.test((await stu(1, 'unlock', ['end', good])).error), 'a closed round
 r = await stu(1, 'unlock', ['start', good]);
 ok(r.ok && r.state.rounds[0].started === true && Object.keys(r.state.rounds[0].answers).length === 0, 'right code starts the round');
 ok((await stu(1, 'unlock', ['start', good])).ok, 'typing the code again is harmless');
-r = await stu(1, 'save', ['start', { 'career.strengths': 2, 'equity.perspectives': 3 }]);
-ok(r.ok && r.state.rounds[0].answers['career.strengths'] === 2 && !('equity.perspectives' in r.state.rounds[0].answers) && r.state.rounds[0].saved && !r.state.rounds[0].submitted, 'draft saved; equity answer dropped');
-ok(/not valid/.test((await stu(1, 'save', ['start', { 'career.strengths': 7 }])).error), 'invalid level refused');
-ok(/21 items have no answer/.test((await stu(1, 'submit', ['start', { 'career.strengths': 2 }])).error), 'incomplete submission refused');
-const all = {}; items.forEach((id, k) => { all[id] = k === 0 ? 'na' : (k % 4) + 1; });
+r = await stu(1, 'save', ['start', { 'career2.strengths': '5', 'career.strengths': 3 }]);
+ok(r.ok && r.state.rounds[0].answers['career2.strengths'] === 5 && !('career.strengths' in r.state.rounds[0].answers) && r.state.rounds[0].saved && !r.state.rounds[0].submitted, 'draft saved; an answer to an item of the removed survey dropped');
+ok(/not valid/.test((await stu(1, 'save', ['start', { 'career2.strengths': 6 }])).error), 'level 6 refused');
+ok(/not valid/.test((await stu(1, 'save', ['start', { 'career2.strengths': 'na' }])).error), 'N/A refused');
+r = await stu(1, 'submit', ['start', { 'career2.strengths': 2 }]);
+ok(/17 items have no answer/.test(r.error) && !/N\/A/.test(r.error), 'incomplete submission refused without mentioning N/A');
+const all = {}; items.forEach((id, k) => { all[id] = (k % 5) + 1; });
 r = await stu(1, 'submit', ['start', all]);
 const first = r.state && r.state.rounds[0].submitted;
-ok(r.ok && first && r.state.rounds[0].answers[items[0]] === 'na', 'complete submission accepted (N/A counts)');
+ok(r.ok && first && r.state.rounds[0].answers[items[0]] === 1 && Object.keys(r.state.rounds[0].answers).length === 18, 'complete submission accepted');
 ok(/submitted/.test((await stu(1, 'save', ['start', all])).error), 'draft saves refused after submission');
 await new Promise(res => setTimeout(res, 20));
 r = await stu(1, 'submit', ['start', Object.assign({}, all, { [items[1]]: 4 })]);
@@ -143,30 +146,31 @@ ok((await stu(1, 'unlock', ['start', sv.sessionCode({ secret: secret }, sv.codeS
 ok(/from 3 to 300/.test((await adm('saveSettings', [{ codeSec: '1' }])).error), 'a 1-second interval is refused');
 r = await adm('saveSettings', [{ code: false }]);
 ok(r.ok && r.data.state.code === false && (await stu(2, 'state')).state.needCode === false, 'session code turned off');
-ok((await stu(2, 'save', ['start', { 'career.strengths': 1 }])).ok, 'without the code requirement a student saves directly');
+ok((await stu(2, 'save', ['start', { 'career2.strengths': 1 }])).ok, 'without the code requirement a student saves directly');
 
-// equity turned on: student 1 now has 3 items missing; turned off again, the answers are kept
-r = await adm('saveSettings', [{ title: 'Survey test 2', off: [] }]);
-ok(r.ok && r.data.state.off.length === 0 && r.data.state.title === 'Survey test 2', 'equity turned on');
-ok((await stu(1, 'state')).state.competencies.length === 8, 'student now sees 8 competencies');
-ok(/3 items have no answer/.test((await stu(1, 'submit', ['start', all])).error), 'resubmitting needs the equity items');
-const withEq = Object.assign({}, all, { 'equity.perspectives': 1, 'equity.practices': 2, 'equity.advocate': 'na' });
-ok((await stu(1, 'submit', ['start', withEq])).ok, 'submitted with the equity items');
-await adm('saveSettings', [{ off: ['equity'] }]);
-await stu(1, 'submit', ['start', all]);
+// teamwork turned off: student 1 resubmits without it and the teamwork answers are kept
+r = await adm('saveSettings', [{ title: 'Survey test 2', off: ['teamwork2'] }]);
+ok(r.ok && r.data.state.off.join() === 'teamwork2' && r.data.state.title === 'Survey test 2', 'teamwork turned off');
+ok((await stu(1, 'state')).state.competencies.length === 5, 'student now sees 5 competencies');
+ok((await adm('log', ['save settings', 'instructor', 5])).data.rows[0].detail.indexOf('turned off: Teamwork') !== -1, 'the competency turned off is logged by name');
+const noTeam = {}; items.filter(id => !/^teamwork2\./.test(id)).forEach(id => { noTeam[id] = all[id]; });
+ok((await stu(1, 'submit', ['start', noTeam])).ok, 'resubmitted without the teamwork items');
 r = await adm('get');
 const row1 = r.data.responses.find(x => x.email === m(1) && x.round === 'start');
-ok(row1.answers['equity.practices'] === 2 && Object.keys(row1.answers).length === 25, 'answers to a competency turned off are kept on later submissions');
-ok(/at least one/i.test((await adm('saveSettings', [{ off: r.data.competencies.filter(c => c.version === 1).map(c => c.code) }])).error), 'turning every competency off refused');
-ok(/Unknown competency/.test((await adm('saveSettings', [{ off: ['career2'] }])).error), 'a version 2 competency cannot be turned off while version 1 is in use');
+ok(row1.answers['teamwork2.share'] === all['teamwork2.share'] && Object.keys(row1.answers).length === 18, 'answers to a competency turned off are kept on later submissions');
+r = await adm('saveSettings', [{ off: [] }]);
+ok(r.ok && r.data.state.off.length === 0 && (await stu(1, 'state')).state.competencies.length === 6, 'teamwork turned on again');
+ok(/at least one/i.test((await adm('saveSettings', [{ off: r.data.competencies.map(c => c.code) }])).error), 'turning every competency off refused');
+ok(/Unknown competency/.test((await adm('saveSettings', [{ off: ['equity'] }])).error), 'a competency of the removed survey refused');
 ok(/Unknown competency/.test((await adm('saveSettings', [{ off: ['nope'] }])).error), 'unknown competency refused');
 
-// the report: student 1 submitted the start round (its first item N/A), student 2 started it
+// the report: student 1 submitted the start round (levels 1 to 5 in turn), student 2 started it
 r = await adm('report');
 ok(r.ok && r.data.title === 'Survey test 2' && r.data.generated && r.data.rounds[0].submitted === 1 && r.data.rounds[0].started === 1 && r.data.rounds[1].submitted === 0
-  && r.data.items.length === 22 && r.data.competencies.length === 7 && r.data.pairs.both === 0, 'report: counts of the start round, equity left out');
-ok(r.data.items[0].start.na === 1 && r.data.items[0].start.n === 0 && r.data.items[1].start.mean === 2 && r.data.overall.start.n === 1 && r.data.students.length === 1
-  && r.data.students[0].email === m(1) && r.data.students[0].start.na === 1 && r.data.students[0].end === null, 'report: item statistics and the student\'s scores');
+  && r.data.items.length === 18 && r.data.competencies.length === 6 && r.data.levels.length === 5 && r.data.pairs.both === 0 && !('version' in r.data) && !('na' in r.data), 'report: counts of the start round');
+ok(r.data.items[0].start.n === 1 && r.data.items[0].start.dist.join() === '1,0,0,0,0' && r.data.items[4].start.dist.join() === '0,0,0,0,1' && r.data.items[1].start.mean === 2
+  && r.data.overall.start.n === 1 && Math.abs(r.data.overall.start.mean - 51 / 18) < 1e-9 && r.data.overall.start.dist.join() === '4,4,4,3,3'
+  && r.data.students.length === 1 && r.data.students[0].email === m(1) && r.data.students[0].end === null, 'report: item statistics and the student\'s scores');
 ok((await adm('log', ['', 'all', 50])).data.rows.every(x => x.action !== 'report'), 'the report is a read: not logged');
 
 // closing time and closing
@@ -176,13 +180,13 @@ ok(/has passed/.test((await adm('setCloses', ['start', new Date(Date.now() - 100
 ok(/Close the start of semester survey first/.test((await adm('deleteRoundAnswers', ['start'])).error), 'all answers of an open survey cannot be deleted');
 r = await adm('closeRound', ['start']);
 ok(r.ok && r.data.open.length === 0 && r.data.state.rounds[0].closedAt, 'start round closed');
-ok(/closed/.test((await stu(2, 'save', ['start', { 'career.strengths': 3 }])).error), 'saving refused after closing');
+ok(/closed/.test((await stu(2, 'save', ['start', { 'career2.strengths': 3 }])).error), 'saving refused after closing');
 ok(/not open/.test((await adm('closeRound', ['start'])).error), 'closing twice refused');
 r = await adm('openRound', ['end', new Date(Date.now() + 2000).toISOString()]);
 ok(r.ok && r.data.open.join() === 'end', 'end round opened with a closing time');
-ok((await stu(3, 'save', ['end', { 'career.strengths': 4 }])).ok, 'saving while open');
+ok((await stu(3, 'save', ['end', { 'career2.strengths': 4 }])).ok, 'saving while open');
 await new Promise(res => setTimeout(res, 2200));
-ok(/closed/.test((await stu(3, 'save', ['end', { 'career.strengths': 3 }])).error) && (await adm('get')).data.open.length === 0, 'the round closes by itself at its closing time');
+ok(/closed/.test((await stu(3, 'save', ['end', { 'career2.strengths': 3 }])).error) && (await adm('get')).data.open.length === 0, 'the round closes by itself at its closing time');
 
 // responses, delete answers, remove a student (answers kept)
 r = await adm('get');
@@ -215,35 +219,19 @@ ok(acts.indexOf('export') === -1 && acts.indexOf('get') === -1 && acts.indexOf('
 ok(lg.filter(x => x.action === 'start').length === 3, 'a draft start is logged once per student and round');
 ok((await adm('log', ['', 'instructor', 5000])).data.rows.every(x => /\(instructor\)$/.test(x.actor)) && (await adm('log', ['', 'students', 5000])).data.rows.every(x => !/\(instructor\)/.test(x.actor)), 'log filtered by who');
 
-// survey version 2: switched in Settings while both rounds are closed; five levels, no N/A; version 1 answers kept but out of the report
-ok(/Unknown survey version/.test((await adm('saveSettings', [{ version: '5' }])).error), 'unknown version refused');
-r = await adm('saveSettings', [{ version: '2' }]);
-ok(r.ok && r.data.state.version === 2 && r.data.state.off.join() === 'equity', 'version 2 chosen; version 1\'s off list kept');
-r = await stu(2, 'state');
-const items2 = r.state.competencies.flatMap(c => c.dims.map(d => c.code + '.' + d.code));
-ok(r.state.version === 2 && items2.length === 18 && r.state.levels.length === 5 && r.state.na === false && r.state.heading === 'Career skills self-assessment' && r.state.prompt && r.state.instruction
-  && r.state.rounds[0].intro && r.state.rounds[1].intro && r.state.competencies.every(c => c.dims.every(d => d.text)), 'student sees version 2: 18 statements, five levels, intros');
+// the end round on its own: student 2 submits levels 1 to 5 in turn; a competency turned off while open leaves the report
 r = await adm('openRound', ['end', '']);
-ok(r.ok && r.data.open.join() === 'end', 'end round opened on version 2');
-ok(/Close the end of semester survey before changing the survey version/.test((await adm('saveSettings', [{ version: '1' }])).error), 'switching back refused while open');
-ok((await stu(2, 'save', ['end', { 'communication2.present': 5 }])).ok, 'level 5 saved');
-ok(/not valid/.test((await stu(2, 'save', ['end', { 'communication2.present': 'na' }])).error), 'N/A refused in version 2');
-r = await stu(2, 'submit', ['end', { 'communication2.present': 5 }]);
-ok(/17 items have no answer/.test(r.error) && !/N\/A/.test(r.error), 'incomplete version 2 submission refused without mentioning N/A');
-const all2 = {}; items2.forEach((id, k) => { all2[id] = (k % 5) + 1; });
-r = await stu(2, 'submit', ['end', Object.assign({ 'career.strengths': 2 }, all2)]);
-ok(r.ok && r.state.rounds[1].submitted && Object.keys(r.state.rounds[1].answers).length === 18, 'version 2 survey submitted; the version 1 answer is dropped');
+ok(r.ok && r.data.open.join() === 'end', 'end round opened again');
+r = await stu(2, 'submit', ['end', Object.assign({ 'career.strengths': 2 }, all)]);
+ok(r.ok && r.state.rounds[1].submitted && Object.keys(r.state.rounds[1].answers).length === 18, 'end survey submitted; the answer to an item of the removed survey dropped');
 r = await adm('report');
-ok(r.ok && r.data.version === 2 && r.data.levels.length === 5 && r.data.na === false && r.data.items.length === 18 && r.data.competencies.length === 6 && r.data.rounds[1].submitted === 1
-  && r.data.items[0].end.dist.join() === '1,0,0,0,0,0' && r.data.items[4].end.dist.join() === '0,0,0,0,1,0' && r.data.overall.end.n === 1 && Math.abs(r.data.overall.end.mean - 51 / 18) < 1e-9 && r.data.overall.end.dist.join() === '4,4,4,3,3,0', 'version 2 report: 18 items, five levels');
+ok(r.ok && r.data.rounds[1].submitted === 1 && r.data.items[0].end.dist.join() === '1,0,0,0,0' && r.data.overall.end.n === 1
+  && Math.abs(r.data.overall.end.mean - 51 / 18) < 1e-9 && r.data.overall.end.dist.join() === '4,4,4,3,3', 'report of the end round');
 r = await adm('saveSettings', [{ off: ['career2'] }]);
-ok(r.ok && r.data.state.off.join() === 'equity,career2' && (await stu(2, 'state')).state.competencies.length === 5, 'a version 2 block turned off beside version 1\'s off list');
+ok(r.ok && r.data.state.off.join() === 'career2' && (await stu(2, 'state')).state.competencies.length === 5 && (await adm('report')).data.items.length === 15, 'a competency turned off while open leaves the student page and the report');
 r = await adm('closeRound', ['end']);
-r = await adm('saveSettings', [{ version: '1' }]);
-ok(r.ok && r.data.state.version === 1 && r.data.state.off.join() === 'equity,career2' && (await stu(2, 'state')).state.levels.length === 4, 'back to version 1 after closing; both off lists kept');
 r = await adm('get');
-ok(r.data.responses.some(x => x.email === m(2) && x.round === 'end' && x.answers['communication2.present'] === 1 && x.answers['communication2.summarize'] === 3), 'version 2 answers kept in the rows');
-ok((await adm('log', ['', 'instructor', 5000])).data.rows.some(x => x.action === 'save settings' && /survey version 2/.test(x.detail || x.text || JSON.stringify(x))), 'the version change is logged');
+ok(r.data.responses.some(x => x.email === m(2) && x.round === 'end' && x.answers['career2.outreach'] === 3 && x.answers['communication2.summarize'] === 3), 'the answers to the competency turned off are kept in the rows');
 
 // delete
 r = await adm('deleteInfo');

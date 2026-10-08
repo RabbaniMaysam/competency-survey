@@ -2,36 +2,34 @@
  * Competency survey: the report statistics, as pure functions on a class's state and its response rows.
  * The instructor page's Report tab shows the result (tables, figures, and the PDF, Word, and Excel downloads).
  *
- * Only submitted surveys of students on the roster count. Levels are 1 to L, the class's survey version's scale
- * (version 1: 1 Emerging Knowledge to 4 Advanced Application, or N/A; version 2: 1 Not at all to 5 Fully, no N/A);
- * N/A answers are counted but left out of every mean.
- *   item statistic:       n = answers at a level, mean and sd of those levels, dist = counts at levels 1 to L and N/A
- *                         (the last entry, always 0 in version 2), na = N/A answers, applying = share of the levels
- *                         at the top two (3 or 4 in version 1, 4 or 5 in version 2).
- *   competency statistic: a student's competency score is the mean of the student's non-N/A answers to its items;
- *                         n = students with a score, mean and sd of the scores; dist, na, applying pool the answers.
+ * Only submitted surveys of students on the roster count. Levels are 1 to L, the survey's scale (1 Not at all to
+ * 5 Fully).
+ *   item statistic:       n = answers, mean and sd of the levels, dist = counts at levels 1 to L,
+ *                         applying = share of the answers at the top two levels (4 or 5).
+ *   competency statistic: a student's competency score is the mean of the student's answers to its items;
+ *                         n = students with a score, mean and sd of the scores; dist and applying pool the answers.
  *   overall:              the same with every item.
- *   change:               for students who submitted both rounds (an item: answered at a level in both),
- *                         before and after = the two means, mean and sd of the differences, a paired t-test
- *                         (t, two-sided p), and the counts of students who rose, stayed, and fell.
+ *   change:               for students who submitted both rounds (an item: answered in both), before and after =
+ *                         the two means, mean and sd of the differences, a paired t-test (t, two-sided p), and the
+ *                         counts of students who rose, stayed, and fell.
  */
 
-import { versionOf } from './items.js';
+import { COMPETENCIES, LEVELS } from './items.js';
 
 const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 const sd = a => { if (a.length < 2) return null; const m = mean(a); return Math.sqrt(a.reduce((t, x) => t + (x - m) * (x - m), 0) / (a.length - 1)); };
 
-/** Statistic of a list of answers (1 to L or 'na'); L = number of levels, 4 by default. */
-export function answerStat(values, L = 4) {
-  const dist = new Array(L + 1).fill(0), nums = [];
-  values.forEach(v => { if (v === 'na') dist[L]++; else { dist[v - 1]++; nums.push(v); } });
-  return { n: nums.length, mean: mean(nums), sd: sd(nums), dist, na: dist[L], applying: nums.length ? (dist[L - 2] + dist[L - 1]) / nums.length : null };
+/** Statistic of a list of answers (1 to L); L = number of levels, the survey's by default. */
+export function answerStat(values, L = LEVELS.length) {
+  const dist = new Array(L).fill(0);
+  values.forEach(v => { dist[v - 1]++; });
+  return { n: values.length, mean: mean(values), sd: sd(values), dist, applying: values.length ? (dist[L - 2] + dist[L - 1]) / values.length : null };
 }
 
 /** Statistic of student scores, with the answers they pool. */
 function scoreStat(scores, answers, L) {
   const a = answerStat(answers, L);
-  return { n: scores.length, mean: mean(scores), sd: sd(scores), dist: a.dist, na: a.na, applying: a.applying };
+  return { n: scores.length, mean: mean(scores), sd: sd(scores), dist: a.dist, applying: a.applying };
 }
 
 /** The change between two rounds from pairs [before, after]. */
@@ -84,14 +82,16 @@ export const tTwoSided = (t, df) => betai(df / 2, 0.5, df / (df + t * t));
 
 /**
  * The report of a class. rows: every response row [{round, email, answers (object), submitted}].
- * Returns {version, levels, na, rounds, competencies, items, overall, pairs, students}; see the file comment for the
- * statistics. Only the items of the class's survey version count; answers to the other version's items are ignored.
+ * Returns {levels, rounds, competencies, items, overall, pairs, students}; see the file comment for the statistics.
+ * Only the items of the competencies turned on count; answers to other item ids are ignored.
  */
 export function report(s, rows) {
   const onRoster = {};
   s.roster.forEach(r => { onRoster[r.email] = true; });
-  const V = versionOf(s.version), L = V.levels.length;
-  const comps = V.competencies.filter(c => s.off.indexOf(c.code) === -1)
+  const L = LEVELS.length;
+  // an answer as a level, or null (no answer, or a value outside the scale, such as an answer stored by the removed survey)
+  const level = v => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= L ? n : null; };
+  const comps =COMPETENCIES.filter(c => s.off.indexOf(c.code) === -1)
     .map(c => ({ code: c.code, name: c.name, items: c.dims.map(d => ({ id: c.code + '.' + d.code, name: d.name })) }));
   const items = comps.flatMap(c => c.items.map(i => ({ id: i.id, comp: c.code, compName: c.name, name: i.name })));
   const ids = s.rounds.map(r => r.id);
@@ -105,23 +105,22 @@ export function report(s, rows) {
              started: mine.filter(x => !x.submitted && onRoster[x.email]).length, outside: mine.filter(x => x.submitted && !onRoster[x.email]).length,
              openedAt: r.openedAt || '', closedAt: r.open ? '' : (r.closedAt || r.closes || '') };
   });
-  // a submitted response's scores: per competency and overall the mean of the non-N/A answers, and the N/A count
+  // a submitted response's scores: per competency and overall the mean of the answers
   function scoresOf(x) {
-    const num = id => (x.answers[id] === undefined || x.answers[id] === 'na' ? null : Number(x.answers[id]));
     const byComp = {}, all = [];
-    comps.forEach(c => { const v = c.items.map(i => num(i.id)).filter(k => k !== null); byComp[c.code] = mean(v); all.push(...v); });
-    return { comps: byComp, overall: mean(all), na: items.filter(i => x.answers[i.id] === 'na').length };
+    comps.forEach(c => { const v = c.items.map(i => level(x.answers[i.id])).filter(k => k !== null); byComp[c.code] = mean(v); all.push(...v); });
+    return { comps: byComp, overall: mean(all) };
   }
   const [A, B] = ids;
   const both = sub[A].map(x => x.email).filter(e => byMail[B][e]);
-  const answersTo = (id, list) => list.map(x => x.answers[id]).filter(v => v !== undefined);
+  const answersTo = (id, list) => list.map(x => level(x.answers[id])).filter(v => v !== null);
   const perRound = f => Object.fromEntries(ids.map(r => [r, f(r)]));  // {start: statistic, end: statistic}
   return {
-    title: s.title, version: V.n, levels: V.levels, na: V.na, rounds,
+    title: s.title, levels: LEVELS, rounds,
     pairs: { both: both.length, startOnly: sub[A].length - both.length, endOnly: sub[B].length - both.length },
     items: items.map(i => Object.assign({ id: i.id, comp: i.comp, compName: i.compName, name: i.name },
       perRound(r => answerStat(answersTo(i.id, sub[r]), L)),
-      { change: paired(both.map(e => [byMail[A][e].answers[i.id], byMail[B][e].answers[i.id]]).filter(p => p.every(v => v !== undefined && v !== 'na'))) })),
+      { change: paired(both.map(e => [level(byMail[A][e].answers[i.id]), level(byMail[B][e].answers[i.id])]).filter(p => p.every(v => v !== null))) })),
     competencies: comps.map(c => Object.assign({ code: c.code, name: c.name, itemIds: c.items.map(i => i.id) },
       perRound(r => scoreStat(sub[r].map(x => scores[r][x.email].comps[c.code]).filter(v => v !== null), c.items.flatMap(i => answersTo(i.id, sub[r])), L)),
       { change: paired(both.map(e => [scores[A][e].comps[c.code], scores[B][e].comps[c.code]]).filter(p => p.every(v => v !== null))) })),
