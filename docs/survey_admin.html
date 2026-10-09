@@ -857,7 +857,7 @@
           });
         })));
       if (b.items.length) sec.appendChild(el('div', { class: 'qcols' }, el('span', { text: 'Statement students rate' }),
-        el('span', { text: 'Advice, shown on the results page to a student who chose this ' + U.one.toLowerCase() + ' and rated the statement 3 or lower' })));
+        el('span', { text: 'Advice: completes "A good way to improve it is to …" on the results page of a student who chose this ' + U.one.toLowerCase() + ' and rated the statement 3 or lower' })));
       b.items.forEach(function (i, ik) {
         var na = el('input', { type: 'checkbox' }); na.checked = !!i.na;
         na.addEventListener('change', function () { i.na = na.checked; edited(); });

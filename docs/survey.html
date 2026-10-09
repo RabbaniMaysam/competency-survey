@@ -126,8 +126,7 @@
     .goal h3 .sc { font-size: 13px; font-weight: 600; color: var(--muted); background: #f0f2f5; padding: 2px 8px; border-radius: 10px; }
     .goal .why { margin: 6px 0 0; color: var(--muted); }
     .tip { margin-top: 10px; }
-    .tip .stmt { margin: 0; font-weight: 600; }
-    .tip .ans { display: inline-block; margin-left: 6px; font-size: 13px; font-weight: 500; color: var(--muted); background: #f0f2f5; padding: 1px 8px; border-radius: 10px; }
+    .tip .stmt { margin: 0; }
     .tip .adv { margin: 4px 0 0; white-space: pre-line; }
     .after { margin-top: 18px; }
   </style>
@@ -649,9 +648,24 @@
     return card;
   }
 
+  // The sentence on a statement rated at each level of the five-point confidence scale (1 to 5), and on the sixth option
+  var CONFIDENCE = ['You have no confidence yet in your ability in ', 'You have little confidence in your ability in ', 'You have some confidence in your ability in ',
+                    'You are mostly confident in your ability in ', 'You are fully confident in your ability in '];
+  var NOT_TRIED = 'You have not yet had a chance to try ';
+  var ADVICE_LEAD = 'A good way to improve it is to ';  // the instructor's advice completes this sentence
+  /** A statement inside a sentence: its first letter in lower case, unless the first word is an acronym ("AI tools ..."). */
+  function inSentence(s) { s = s.trim(); return /^[A-Z][A-Z]/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1); }
+  /** The sentence on the student's answer v to statement s, with the statement in bold. */
+  function answerSentence(s, v) {
+    var lead = v === 'na' ? NOT_TRIED : S.levels.length === 5 ? CONFIDENCE[Number(v) - 1] : null;
+    if (lead) return el('p', { class: 'stmt' }, lead, el('b', { text: inSentence(s).replace(/\.$/, '') }), '.');
+    return el('p', { class: 'stmt' }, 'You rated ', el('b', { text: s.trim().replace(/\.$/, '') }), ' as "' + S.levels[Number(v) - 1] + '".');
+  }
+
   /**
    * One chosen goal: the section's name and score, then the advice of the statements the Worker picked (a: {ids, high};
-   * ids lowest-rated first), each with the student's answer. high: every statement was rated above the middle of the scale.
+   * ids lowest-rated first), each as a sentence on the student's answer and the advice after "A good way to improve it is to".
+   * high: every statement was rated above the middle of the scale.
    */
   function goalAdvice(r, b, a) {
     var x = r.scores.filter(function (s) { return s.id === b.id; })[0];
@@ -663,9 +677,7 @@
       var i = b.items.filter(function (q) { return q.id === id; })[0];
       if (!i) return;
       var v = r.answers[id];
-      box.appendChild(el('div', { class: 'tip' },
-        el('p', { class: 'stmt' }, i.text, el('span', { class: 'ans', text: 'You: ' + (v === 'na' ? S.naLabel : S.levels[Number(v) - 1]) })),
-        el('p', { class: 'adv', text: i.advice })));
+      box.appendChild(el('div', { class: 'tip' }, answerSentence(i.text, v), el('p', { class: 'adv', text: ADVICE_LEAD + i.advice.trim() })));
     });
     return box;
   }
