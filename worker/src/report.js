@@ -99,7 +99,7 @@ export function report(s, rows) {
   const L = (s.survey.levels || LEVELS).length;
   // an answer as a level, or null (no answer, 'na', or a value outside the scale, such as an answer stored by the removed survey)
   const level = v => { if (v === 'na' || v === null || v === '') return null; const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= L ? n : null; };
-  const comps = s.survey.blocks.map(b => ({ code: b.id, name: b.name, items: b.items.map(i => ({ id: i.id, name: i.name || i.text, text: i.text, na: !!i.na })) }));
+  const comps = s.survey.blocks.map(b => ({ code: b.id, name: b.name, items: b.items.map(i => ({ id: i.id, name: i.text, text: i.text, na: !!i.na })) }));  // an item's label is its statement
   const items = comps.flatMap(c => c.items.map(i => ({ id: i.id, comp: c.code, compName: c.name, name: i.name, text: i.text, na: i.na })));
   const ids = s.rounds.map(r => r.id);
   const sub = {}, byMail = {}, scores = {};

@@ -356,7 +356,7 @@ async function adminDo(env, real, who, action, key, args) {
     const d = sv.ADMIN.saveSurvey(s, args[0]);
     await writeClass(env, key, s);
     const list = (what, items) => (items.length ? [what + ': ' + items.map(i => i.blockName + ': ' + i.name).join(', ')] : []);
-    const parts = [].concat(list('added', d.added), list('removed', d.removed), list('reworded', d.reworded), list('short label changed', d.relabeled),
+    const parts = [].concat(list('added', d.added), list('removed', d.removed), list('reworded', d.reworded), list('advice changed', d.advised),
       list('sixth option added', d.naOn), list('sixth option removed', d.naOff),
       d.order ? ['sections or order changed'] : [], d.texts ? ['texts changed'] : [], d.scale ? ['scale labels changed'] : []);
     logs.push(['save questions', sv.activeItems(s).length + ' questions in ' + s.survey.blocks.length + ' sections; ' + (parts.join('; ') || 'no change')]);

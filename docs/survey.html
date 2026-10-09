@@ -121,8 +121,14 @@
     .goalrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 16px; }
     .goalrow .count { color: var(--muted); flex: 1; }
     button.go.brown { background: #4a3322; }
-    .chosen { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
-    .chosen li { padding: 8px 14px; border-radius: 12px; background: #4a3322; color: #fff; font-weight: 600; }
+    .goal { margin-top: 14px; padding: 2px 0 2px 14px; border-left: 4px solid #4a3322; }
+    .goal h3 { margin: 0; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+    .goal h3 .sc { font-size: 13px; font-weight: 600; color: var(--muted); background: #f0f2f5; padding: 2px 8px; border-radius: 10px; }
+    .goal .why { margin: 6px 0 0; color: var(--muted); }
+    .tip { margin-top: 10px; }
+    .tip .stmt { margin: 0; font-weight: 600; }
+    .tip .ans { display: inline-block; margin-left: 6px; font-size: 13px; font-weight: 500; color: var(--muted); background: #f0f2f5; padding: 1px 8px; border-radius: 10px; }
+    .tip .adv { margin: 4px 0 0; white-space: pre-line; }
     .after { margin-top: 18px; }
   </style>
 </head>
@@ -522,7 +528,6 @@
 
   function f1(v) { return v === null || v === undefined ? '' : (Math.round(v * 10) / 10).toFixed(1); }
   function pos(v) { return ((v - 1) / (S.levels.length - 1) * 100) + '%'; }
-  function names(ids) { return S.blocks.filter(function (b) { return ids.indexOf(b.id) !== -1; }).map(function (b) { return b.name; }); }
 
   /**
    * The results page of a submitted round: a card with the student's score in each section on a track from 1 to 5
@@ -604,10 +609,11 @@
     if (!editing) {
       card.appendChild(el('h2', { text: isEnd ? 'Your goals' : 'Your goals for this semester' }));
       if (r.goals.length) {
-        card.appendChild(el('p', { class: 'lead', text: goalsNote || 'The ' + many + ' you chose to work on:' }));
-        var ul = el('ul', { class: 'chosen' });
-        names(r.goals).forEach(function (n) { ul.appendChild(el('li', { text: n })); });
-        card.appendChild(ul);
+        var advice = r.advice || {};
+        var tipsAt = r.goals.some(function (g) { return advice[g]; });
+        card.appendChild(el('p', { class: 'lead', text: (goalsNote ? goalsNote + ' ' : '') + 'The ' + many + ' you chose to work on'
+          + (tipsAt ? ', with advice on the statements you rated lowest.' : '.') }));
+        S.blocks.filter(function (b) { return r.goals.indexOf(b.id) !== -1; }).forEach(function (b) { card.appendChild(goalAdvice(r, b, advice[b.id])); });
         if (r.open) card.appendChild(el('p', { style: 'margin-top:12px' }, el('button', { class: 'link', text: 'Change my goals', on: { click: function () { goalDraft = r.goals.slice(); goalsNote = ''; redraw(); } } })));
       } else if (r.open) {
         card.appendChild(el('p', { class: 'lead' }, 'You have not chosen goals yet. You can while the survey is open. ',
@@ -636,11 +642,32 @@
     count = el('span', { class: 'count', text: n === 0 ? 'Tap up to ' + max + ' ' + many + '.' : n + ' of ' + max + ' chosen' + (n === max ? '.' : '; you can pick ' + (max - n) + ' more.') });
     go = el('button', { class: 'go brown', text: goalsBusy ? 'Saving...' : 'Save my goals', disabled: !!(goalsBusy || (!n && !r.goals.length)), on: { click: function () { saveGoals(r, redraw); } } });
     var row = el('div', { class: 'goalrow' }, count, go);
-    if (r.goals.length) row.appendChild(el('button', { class: 'link', text: 'Cancel', on: { click: function () { goalDraft = null; redraw(); } } }));
+    if (r.goals.length) row.appendChild(el('button', { class: 'link', text: 'Cancel', on: { click: function () { goalDraft = null; goalsNote = ''; redraw(); } } }));
     else row.appendChild(el('button', { class: 'link', text: 'Not now', on: { click: function () { goalDraft = null; goalsNote = ''; goalsSkipped = true; redraw(); } } }));
     card.appendChild(row);
     if (goalsNote) card.appendChild(el('div', { class: 'banner err', text: goalsNote }));
     return card;
+  }
+
+  /**
+   * One chosen goal: the section's name and score, then the advice of the statements the Worker picked (a: {ids, high};
+   * ids lowest-rated first), each with the student's answer. high: every statement was rated above the middle of the scale.
+   */
+  function goalAdvice(r, b, a) {
+    var x = r.scores.filter(function (s) { return s.id === b.id; })[0];
+    var box = el('div', { class: 'goal' }, el('h3', {}, el('span', { text: b.name }), x && x.score !== null ? el('span', { class: 'sc', text: f1(x.score) }) : null));
+    if (!a || !a.ids.length) return box;
+    var L = S.levels.length;
+    if (a.high) box.appendChild(el('p', { class: 'why', text: 'You rated every statement here ' + (Math.ceil(L / 2) + 1) + ' or higher. The one you rated lowest:' }));
+    a.ids.forEach(function (id) {
+      var i = b.items.filter(function (q) { return q.id === id; })[0];
+      if (!i) return;
+      var v = r.answers[id];
+      box.appendChild(el('div', { class: 'tip' },
+        el('p', { class: 'stmt' }, i.text, el('span', { class: 'ans', text: 'You: ' + (v === 'na' ? S.naLabel : S.levels[Number(v) - 1]) })),
+        el('p', { class: 'adv', text: i.advice })));
+    });
+    return box;
   }
 
   /** Saves the chosen goals; the whole results page is then redrawn (the goal tags beside the scores change), without the slide. */
@@ -650,7 +677,7 @@
     var chosen = goalDraft.slice();
     api('goals', [r.id, chosen]).then(function (s) {
       goalsBusy = false; S = s; goalDraft = null;
-      goalsNote = chosen.length ? 'Saved. The ' + (chosen.length === 1 ? 'area' : 'areas') + ' you chose to work on:' : '';
+      goalsNote = chosen.length ? 'Saved.' : '';
       done = ''; render();
     }).catch(function (e) {
       goalsBusy = false;

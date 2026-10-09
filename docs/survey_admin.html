@@ -94,6 +94,8 @@
     .qnum { min-width: 24px; padding-top: 5px; color: var(--muted); font-weight: 600; }
     .qbody { flex: 1; min-width: 0; }
     .qbody textarea { width: 100%; resize: vertical; }
+    .qadvice { display: block; margin-top: 4px; }
+    .qadvice > span { display: block; font-size: 0.9em; color: var(--muted); }
     .qtexts { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
     .qtexts summary { cursor: pointer; }
     .qgrid { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 6px 10px; align-items: start; margin-top: 8px; }
@@ -721,7 +723,8 @@
     };
     var small = function (label, title, fn) { return el('button', { class: 'plain small', text: label, title: title, 'aria-label': title, disabled: busy, on: { click: fn } }); };
     var move = function (arr, k, d) { var j = k + d; if (j < 0 || j >= arr.length) return; var t = arr[k]; arr[k] = arr[j]; arr[j] = t; render(); };
-    var blank = function () { return { id: '', name: '', text: '', na: false }; };
+    // a new question, with the placeholder advice of its position (section bk, question ik, both 1-based)
+    var blank = function (bk, ik) { return { id: '', text: '', advice: 'Placeholder advice ' + bk + '.' + ik, na: false }; };
 
     var save = function () {
       if (!questionsDirty()) { flash = { ok: 'Nothing changed.' }; render(); return; }
@@ -735,6 +738,8 @@
 
     card.appendChild(el('p', { class: 'muted', text: 'The questions of this class\'s survey, in ' + U.many.toLowerCase() + '. Students rate each question on the five-option scale. '
       + 'Tick "sixth option" on a question to add "' + Q.naLabel + '" to it: the answer is stored as NA and left out of the report\'s means and changes. '
+      + 'A question\'s advice is shown on the results page to a student who chose its ' + U.one.toLowerCase() + ' as a goal and rated the question 3 or lower (or the sixth option); '
+      + 'when the student rated every question of it 4 or 5, the advice of the lowest-rated one is shown. '
       + 'Changing a question\'s wording keeps the answers given to it; to ask something else, remove the question and add a new one. '
       + 'A removed question keeps its answers (the Responses tab and the CSV list them as removed). Nothing changes for students until you Save.' }));
     if (anyOpen) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'A survey is open. Change the questions before opening a survey where possible.' }));
@@ -794,20 +799,21 @@
         var k = counts[i.id] || 0;
         sec.appendChild(el('div', { class: 'qitem' }, el('span', { class: 'qnum', text: (ik + 1) + '.' }),
           el('div', { class: 'qbody' }, field(i, 'text', { maxlength: 400, placeholder: 'the statement students rate' }, 2),
+            el('label', { class: 'qadvice' }, el('span', { text: 'Advice' }),
+              field(i, 'advice', { maxlength: 1500, placeholder: 'shown to a student who chose this ' + U.one.toLowerCase() + ' and rated this question low; empty: none' }, 2)),
             el('div', { class: 'row', style: 'margin:4px 0 0' },
-              el('label', {}, 'Short label', field(i, 'name', { size: 30, maxlength: 80, placeholder: 'for the report; empty: the statement' })),
               el('label', { title: 'Adds "' + Q.naLabel + '" to this question' }, na, 'sixth option'),
               small('↑', 'Move this question up', function () { move(b.items, ik, -1); }),
               small('↓', 'Move this question down', function () { move(b.items, ik, 1); }),
               small('Remove', 'Remove this question', function () { b.items.splice(ik, 1); render(); }),
               el('span', { class: 'muted', text: !i.id ? 'new' : k ? k + ' answer' + (k === 1 ? '' : 's') + ' stored' : 'no answers yet' })))));
       });
-      sec.appendChild(el('div', { class: 'row', style: 'margin:6px 0 0' }, button('Add a question', 'plain', function () { var q = blank(); b.items.push(q); qFocus = q; render(); }),
+      sec.appendChild(el('div', { class: 'row', style: 'margin:6px 0 0' }, button('Add a question', 'plain', function () { var q = blank(bk + 1, b.items.length + 1); b.items.push(q); qFocus = q; render(); }),
         b.items.length ? null : el('span', { class: 'muted', text: 'A ' + U.one.toLowerCase() + ' needs at least one question.' })));
       card.appendChild(sec);
     });
     card.appendChild(el('div', { class: 'row', style: 'margin-top:12px' }, button('Add a ' + U.one.toLowerCase(), 'plain', function () {
-      var q = blank(); Q.blocks.push({ id: '', name: '', items: [q] }); qFocus = q; render();
+      var q = blank(Q.blocks.length + 1, 1); Q.blocks.push({ id: '', name: '', items: [q] }); qFocus = q; render();
     })));
     card.appendChild(saveRow());
     edited();
@@ -817,7 +823,7 @@
   function questionChanges(a, b) {
     var flat = function (sv) {
       var out = [];
-      sv.blocks.forEach(function (bl) { bl.items.forEach(function (i) { out.push({ id: i.id, block: bl.name, name: (i.name || i.text).trim(), text: i.text.trim(), na: !!i.na }); }); });
+      sv.blocks.forEach(function (bl) { bl.items.forEach(function (i) { out.push({ id: i.id, block: bl.name, name: i.text.trim(), text: i.text.trim(), advice: (i.advice || '').trim(), na: !!i.na }); }); });
       return out;
     };
     var A = flat(a), B = flat(b);
@@ -831,13 +837,14 @@
     add(added, 'Added');
     add(removed, 'Removed; their answers stay stored');
     add(reworded, 'Reworded; their answers stay attached');
+    add(B.filter(function (i) { var o = old(i.id); return o && o.advice !== i.advice; }), 'Advice changed');
     add(B.filter(function (i) { var o = old(i.id); return i.na && !(o && o.na); }), 'Sixth option added');
     add(B.filter(function (i) { var o = old(i.id); return !i.na && o && o.na; }), 'Sixth option removed; NA answers to them no longer count as answers');
     if (JSON.stringify(a.blocks.map(function (x) { return x.name.trim(); })) !== JSON.stringify(b.blocks.map(function (x) { return x.name.trim(); }))) lines.push('Sections renamed, added, removed, or reordered.');
     else if (JSON.stringify(A.map(function (i) { return i.id; })) !== JSON.stringify(B.map(function (i) { return i.id; }))) lines.push('Questions reordered.');
     if (JSON.stringify(a.levels) !== JSON.stringify(b.levels) || a.naLabel !== b.naLabel) lines.push('Answer options: ' + b.levels.join(', ') + '; sixth option: ' + b.naLabel + '.');
     if (['heading', 'instruction', 'prompt'].some(function (k) { return a[k] !== b[k]; }) || JSON.stringify(a.intro) !== JSON.stringify(b.intro) || JSON.stringify(a.unit) !== JSON.stringify(b.unit)) lines.push('Texts of the student page or the section word changed.');
-    if (!lines.length) lines.push('Short labels changed.');
+    if (!lines.length) lines.push('Spacing of the texts changed.');
     return lines;
   }
 
@@ -1020,21 +1027,37 @@
   /** Text at (x, y) (y = baseline); o: {size, bold, fill, middle} */
   var text = function (x, y, s, o) { o = o || {}; return { k: 'text', x: x, y: y, s: String(s), size: o.size || CH.font, bold: !!o.bold, fill: o.fill || INK, middle: !!o.middle }; };
 
-  /** The frame of a horizontal chart: legend, one row per entry (group rows as bold headings), row labels. */
+  /** A label in lines of at most `width` characters, broken at spaces; beyond `max` lines the last ends in "…". */
+  function wrapLabel(s, width, max) {
+    var out = [], cur = '';
+    s.split(/\s+/).forEach(function (w) {
+      if (cur && (cur + ' ' + w).length > width) { out.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w;
+    });
+    if (cur) out.push(cur);
+    out = out.map(function (l) { return l.length > width ? l.slice(0, width - 1) + '…' : l; });
+    if (out.length > max) { out = out.slice(0, max); var l = out[max - 1]; out[max - 1] = (l.length > width - 1 ? l.slice(0, width - 1) : l) + '…'; }
+    return out;
+  }
+  var LABEL_LINE = 14;  // px between the lines of a wrapped row label
+  /** The frame of a horizontal chart: legend, one row per entry (group rows as bold headings), row labels (up to three lines each). */
   function chartFrame(rows, legend) {
     var top = 10 + (legend ? 24 : 0), y = top, ys = [], ops = [];
-    rows.forEach(function (r) { if (r.group) { y += 6; ys.push(y + CH.group - 8); y += CH.group; } else { ys.push(y + CH.row / 2); y += CH.row; } });
+    var grouped = rows.some(function (r) { return r.group; });
+    var lines = rows.map(function (r) { return r.group ? wrapLabel(r.group, 40, 1) : wrapLabel(r.label, grouped ? 36 : 38, 3); });
+    rows.forEach(function (r, k) {
+      if (r.group) { y += 6; ys.push(y + CH.group - 8); y += CH.group; return; }
+      var h = CH.row + (lines[k].length - 1) * LABEL_LINE;
+      ys.push(y + h / 2); y += h;
+    });
     var lx = 0;
     (legend || []).forEach(function (g) {
       ops.push(g.dot ? circle(lx + 6, 12, 5.5, g.color) : rect(lx, 6, 12, 12, g.color));
       ops.push(text(lx + 17, 16, g.label));
       lx += 17 + g.label.length * 6.4 + 16;
     });
-    var grouped = rows.some(function (r) { return r.group; });
     rows.forEach(function (r, k) {
-      var label = r.group || r.label;
-      if (label.length > 42) label = label.slice(0, 41) + '…';
-      ops.push(text(r.group || !grouped ? 0 : 14, ys[k] + 4, label, { bold: !!(r.group || r.bold) }));
+      var first = ys[k] + 4 - (lines[k].length - 1) * LABEL_LINE / 2;
+      lines[k].forEach(function (l, j) { ops.push(text(r.group || !grouped ? 0 : 14, first + j * LABEL_LINE, l, { bold: !!(r.group || r.bold) })); });
     });
     return { w: CH.w, h: y + 26, ops: ops, ys: ys, top: top, axisY: y, x0: CH.label, x1: CH.w - CH.right };
   }

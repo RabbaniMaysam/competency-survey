@@ -11,7 +11,7 @@ const T0 = Date.parse('2026-09-01T12:00:00Z');
 
 // the default survey: 18 one-sentence statements in 6 blocks, five levels, no question with the sixth option
 const DEF = defaultSurvey(), DEF_ITEMS = sv.surveyItems(DEF);
-ok(COMPETENCIES.length === 6 && DEF.blocks.length === 6 && DEF_ITEMS.length === 18 && COMPETENCIES.every(c => /2$/.test(c.code) && c.dims.length === 3 && c.dims.every(d => d.name && /^[A-Z].*\.$/.test(d.text) && d.text.length < 160)), '6 blocks of 3 one-sentence statements');
+ok(COMPETENCIES.length === 6 && DEF.blocks.length === 6 && DEF_ITEMS.length === 18 && COMPETENCIES.every(c => /2$/.test(c.code) && c.dims.length === 3 && c.dims.every(d => !('name' in d) && /^[A-Z].*\.$/.test(d.text) && d.text.length < 160)), '6 blocks of 3 one-sentence statements');
 ok(new Set(DEF_ITEMS.map(i => i.id)).size === 18 && DEF_ITEMS.every(i => /^[a-z]+2\.[a-z]+$/.test(i.id) && i.text && i.na === false), 'item ids are unique; no sixth option by default');
 ok(LEVELS.length === 5 && LEVELS[0] === 'Not at all' && LEVELS[4] === 'Fully' && DEF.levels.join() === LEVELS.join() && DEF.naLabel === NA_LABEL && NA_LABEL === 'Didn\'t have a chance to try', 'five confidence levels; the sixth option "Didn\'t have a chance to try"');
 ok(sv.upgrade({ title: 'x', survey: Object.assign(defaultSurvey(), { naLabel: 'No chance to try' }) }).survey.naLabel === NA_LABEL && sv.upgrade({ title: 'x', survey: Object.assign(defaultSurvey(), { naLabel: 'N/A' }) }).survey.naLabel === 'N/A', 'upgrade renames the old default label only');
@@ -26,8 +26,19 @@ ok(sv.activeItems(s).length === 18 && s.survey.blocks.length === 6 && JSON.strin
 const old = sv.upgrade({ title: 'x', version: 1, off: ['equity', 'career2'] });
 ok(!('off' in old) && !('version' in old) && old.survey.blocks.length === 5 && !old.survey.blocks.some(b => b.id === 'career2') && old.rounds.length === 2 && Array.isArray(old.roster),
   'upgrade: the default survey without the blocks turned off; off and version dropped');
-ok(old.retired.map(r => r.id).join() === 'career2.strengths,career2.requirements,career2.outreach' && old.retired.every(r => r.blockName === 'Career and self-development' && r.name && r.text),
+ok(old.retired.map(r => r.id).join() === 'career2.strengths,career2.requirements,career2.outreach' && old.retired.every(r => r.blockName === 'Career and self-development' && !('name' in r) && r.text),
   'upgrade: the questions of a block turned off are retired, with their labels');
+// a class saved before the advice field: the short labels dropped, each question given the placeholder of its position
+{
+  const pre = sv.newClass('x', T0);
+  pre.survey.blocks.forEach(b => b.items.forEach(i => { i.name = 'label'; delete i.advice; }));
+  pre.survey.blocks[1].items[2].advice = 'Kept.';
+  pre.retired.push({ id: 'old.q', blockName: 'Old', name: 'old label', text: 'Old question.' });
+  sv.upgrade(pre);
+  ok(pre.survey.blocks.every(b => b.items.every(i => !('name' in i))) && pre.survey.blocks[0].items[0].advice === 'Placeholder advice 1.1' && pre.survey.blocks[5].items[2].advice === 'Placeholder advice 6.3'
+    && pre.survey.blocks[1].items[2].advice === 'Kept.' && !('name' in pre.retired[0]) && sv.allItems(pre).slice(-1)[0].name === 'Old question.', 'upgrade: short labels dropped; placeholder advice by position; stored advice kept');
+}
+ok(DEF.blocks[0].items[0].advice === 'Placeholder advice 1.1' && DEF.blocks[3].items[1].advice === 'Placeholder advice 4.2' && DEF_ITEMS.every(i => i.name === i.text), 'the default advice: placeholders by position; an item\'s label is its statement');
 ok(sv.allItems(old).length === 18 && sv.allItems(old).slice(15).every(i => i.retired) && sv.activeItems(old).length === 15, 'allItems lists the survey, then the retired questions');
 ok(sv.upgrade({ title: 'x' }).survey.blocks.length === 6 && sv.upgrade({ title: 'x' }).retired.length === 0, 'upgrade: a class without an off list has the full default survey');
 ok(sv.upgrade({ title: 'x', off: COMPETENCIES.map(c => c.code) }).survey.blocks.length === 6, 'upgrade: a class with every block off (not possible before) keeps the full survey');
@@ -125,7 +136,29 @@ ok(v.rounds[0].scores.length === 0 && v.rounds[0].goals.length === 0 && v.rounds
   ok(sv.goalsOf(s, row).join() === 'communication2,thinking2' && sv.goalsOf(s, null).length === 0 && sv.goalsOf(s, { goals: 'x' }).length === 0, 'the goals of a row: the ids in the survey now, in its order');
   const sv2 = sv.studentView(s, 'bo@montclair.edu', [row], T0);
   ok(sv2.rounds[0].goals.join() === 'communication2,thinking2' && sv2.rounds[0].scores.length === 6 && near(sv2.rounds[0].scores[0].score, 2.5) && sv2.rounds[0].scores[0].na === 1, 'the student view sends the submitted round\'s scores and goals');
+  ok(sv2.rounds[0].advice.professionalism2 && sv2.blocks[0].items[0].advice === 'Placeholder advice 1.1', 'the student view sends the advice and the questions it applies to');
   const off = JSON.parse(JSON.stringify(s.survey)); off.blocks[0].items[0].na = false; sv.ADMIN.saveSurvey(s, off);
+}
+
+// the advice of the results page: the questions of each section the student rated low (3 or lower, or the sixth option)
+{
+  const q = sv.newClass('Advice', T0);
+  const e = JSON.parse(JSON.stringify(q.survey)); e.blocks[0].items.forEach(i => { i.na = true; }); e.blocks[2].items[1].advice = ''; sv.ADMIN.saveSurvey(q, e);
+  const a = {};
+  sv.activeItems(q).forEach(i => { a[i.id] = 5; });
+  Object.assign(a, { 'professionalism2.deadlines': 2, 'professionalism2.check': 5, 'professionalism2.email': 5 });  // the example: only deadlines is low
+  Object.assign(a, { 'communication2.present': 'na', 'communication2.memo': 3, 'communication2.summarize': 1 });    // all low: 1, 3, then the sixth option
+  Object.assign(a, { 'teamwork2.share': 4, 'teamwork2.disagree': 5, 'teamwork2.plan': 4 });                       // none low: the first of the lowest
+  Object.assign(a, { 'thinking2.parts': 5, 'thinking2.numbers': 1, 'thinking2.sources': 5 });                     // the low one has no advice
+  const ad = sv.adviceItems(q, a);
+  ok(ad.professionalism2.ids.join() === 'professionalism2.deadlines' && ad.professionalism2.high === false, 'the example: only the deadlines question is advised');
+  ok(ad.communication2.ids.join() === 'communication2.summarize,communication2.memo,communication2.present' && !ad.communication2.high, 'lowest first, the sixth option after the levels');
+  ok(ad.teamwork2.ids.join() === 'teamwork2.share' && ad.teamwork2.high === true, 'nothing low: the lowest-rated question, marked high');
+  ok(ad.thinking2.ids.join() === 'thinking2.parts' && ad.thinking2.high === true, 'a question without advice is skipped');
+  ok(ad.career2.ids.length === 1 && ad.career2.high && Object.keys(sv.adviceItems(q, {})).length === 0, 'all at the top: one question; no answers: nothing');
+  const four = JSON.parse(JSON.stringify(q.survey)); four.blocks[0].items.push({ id: '', text: 'A fourth question.', advice: 'Do it.' }); sv.ADMIN.saveSurvey(q, four);
+  const id4 = q.survey.blocks[0].items[3].id;
+  ok(sv.adviceItems(q, Object.assign({}, a, { [id4]: 2 })).communication2.ids.length === sv.ADVICE_MAX, 'at most 3 questions per section');
 }
 ok(sv.studentView(s, 'stranger@x.edu', [], T0).authorized === false && !('rounds' in sv.studentView(s, 'stranger@x.edu', [], T0)), 'a stranger sees nothing');
 ok(v.needCode === true && v.rounds[0].started === true && v.rounds[1].started === false, 'student view: session code needed, a round with a stored row is started');
@@ -176,7 +209,8 @@ ok(s.title === 'New title' && !('off' in s) && sv.activeItems(s).length === 18 &
   const ed = JSON.parse(JSON.stringify(q.survey));
   ed.blocks[0].items[0].text = 'Presenting to a group without notes.';            // reworded: keeps its id
   ed.blocks[0].items[1].na = true;                                                 // the sixth option
-  ed.blocks[0].items.push({ id: '', name: '', text: 'Listening without interrupting.', na: true });  // added
+  ed.blocks[0].items.push({ id: '', name: 'ignored', text: 'Listening without interrupting.', advice: ' Listen to a podcast. ', na: true });  // added
+  ed.blocks[0].items[2].advice = 'New advice.';                                    // advice changed
   ed.blocks[1].items.splice(2, 1);                                                 // teamwork2.plan removed
   ed.blocks.splice(5, 1);                                                          // the career block removed
   ed.blocks.push({ id: '', name: '  Ethics  ', items: [{ text: 'Citing every source you use.' }] });  // a new block, minimal fields
@@ -189,8 +223,10 @@ ok(s.title === 'New title' && !('off' in s) && sv.activeItems(s).length === 18 &
     'a reworded question keeps its id; the sixth option stored; a new question receives an id');
   ok(q.survey.blocks[2].id === 'technology2' && q.survey.blocks[3].id === 'thinking2' && q.survey.unit.many === 'Skills', 'block order and the section word saved');
   ok(q.retired.map(r => r.id).join() === 'teamwork2.plan,career2.strengths,career2.requirements,career2.outreach' && q.retired[0].blockName === 'Teamwork and leadership', 'removed questions retired with their labels');
-  ok(d.added.length === 2 && d.removed.length === 4 && d.reworded.length === 1 && d.reworded[0].id === 'communication2.present' && d.naOn.length === 2 && d.naOff.length === 0 && d.order && d.texts && !d.scale,
-    'the change summary: added, removed, reworded, sixth option, order, texts');
+  ok(d.added.length === 2 && d.removed.length === 4 && d.reworded.length === 1 && d.reworded[0].id === 'communication2.present' && d.naOn.length === 2 && d.naOff.length === 0 && d.order && d.texts && !d.scale
+    && d.advised.length === 1 && d.advised[0].id === 'communication2.summarize', 'the change summary: added, removed, reworded, advice, sixth option, order, texts');
+  ok(q.survey.blocks[0].items[3].advice === 'Listen to a podcast.' && !('name' in q.survey.blocks[0].items[3]) && q.survey.blocks[5].items[0].advice === '' && !('name' in q.retired[0]),
+    'advice stored trimmed (empty when not sent); no short label stored');
   // answers: 'na' to a question with the sixth option counts; a retired question's answers are not the survey's
   const ans = {}; items.forEach(i => { ans[i.id] = 3; }); ans[ids[1]] = 'na';
   const c = sv.cleanAnswers(q, Object.assign({ 'teamwork2.plan': 4 }, ans));
@@ -213,6 +249,7 @@ ok(s.title === 'New title' && !('off' in s) && sv.activeItems(s).length === 18 &
   bad(e => { e.blocks = []; }, /at least one section/, 'no section refused');
   bad(e => { e.blocks[0].items = []; }, /has no questions/, 'an empty section refused');
   bad(e => { e.blocks[0].items[0].text = '  '; }, /Question 1 of "Communication" is empty/, 'an empty question refused');
+  bad(e => { e.blocks[0].items[0].advice = 'x'.repeat(1501); }, /\(advice\) has 1501 characters/, 'advice over 1500 characters refused');
   bad(e => { e.blocks[0].name = ''; }, /name of section 1 is empty/, 'a section without a name refused');
   bad(e => { e.levels = e.levels.slice(0, 4); }, /exactly five/, 'four options refused');
   bad(e => { e.levels[4] = ''; }, /Option 5 of the scale is empty/, 'an empty option refused');

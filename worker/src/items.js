@@ -1,8 +1,9 @@
 /**
  * The default survey of a new class: 6 sections (competencies) of 3 one-sentence statements (18 in all), each
  * rated for confidence on the five LEVELS. Each class keeps its own copy (defaultSurvey), which the instructor
- * edits on the Questions tab (see survey.js). A dimension's `name` is the short label used in the report and the
- * responses tables; `text` is the statement the student rates.
+ * edits on the Questions tab (see survey.js). A dimension's `text` is the statement the student rates; its advice
+ * is shown on the results page to a student who chose its competency as a goal and rated the statement low
+ * (placeholders "Placeholder advice 1.1" to "6.3" until the real advice is written; placeholderAdvice).
  *
  * A default item's id is competency code + '.' + dimension code (for example 'career2.outreach'); ids are stored
  * with the answers, so an item keeps its id when edited. (The codes end in 2 because an earlier, longer survey
@@ -20,31 +21,34 @@ export const NA_LABEL_OLD = 'No chance to try';
 /** What a section is called on the instructor page and in the report. */
 export const UNIT = { one: 'Competency', many: 'Competencies' };
 
+/** The placeholder advice of question q (1-based) of section b (1-based). */
+export const placeholderAdvice = (b, q) => 'Placeholder advice ' + b + '.' + q;
+
 export const COMPETENCIES = [
   { code: 'communication2', name: 'Communication', dims: [
-    { code: 'present', name: 'Present without notes', text: 'Presenting clearly to a class or group without reading from your notes.' },
-    { code: 'memo', name: 'Write a clear memo', text: 'Writing a one-page memo or report that someone else can act on.' },
-    { code: 'summarize', name: 'Summarize before responding', text: 'Summarizing what someone said before you respond.' }] },
+    { code: 'present', text: 'Presenting clearly to a class or group without reading from your notes.' },
+    { code: 'memo', text: 'Writing a one-page memo or report that someone else can act on.' },
+    { code: 'summarize', text: 'Summarizing what someone said before you respond.' }] },
   { code: 'teamwork2', name: 'Teamwork and leadership', dims: [
-    { code: 'share', name: 'Do own share on time', text: 'Doing your share of group work on time without being reminded.' },
-    { code: 'disagree', name: 'Settle disagreements', text: 'Helping your group settle a disagreement and keep everyone on board.' },
-    { code: 'plan', name: 'Set up a plan', text: 'Setting up a plan for a group that has none: who does what, and by when.' }] },
+    { code: 'share', text: 'Doing your share of group work on time without being reminded.' },
+    { code: 'disagree', text: 'Helping your group settle a disagreement and keep everyone on board.' },
+    { code: 'plan', text: 'Setting up a plan for a group that has none: who does what, and by when.' }] },
   { code: 'thinking2', name: 'Critical thinking and data', dims: [
-    { code: 'parts', name: 'Break a question into parts', text: 'Breaking a messy question into smaller ones you can answer.' },
-    { code: 'numbers', name: 'Use data to test a claim', text: 'Using data to support or reject a claim.' },
-    { code: 'sources', name: 'Judge a source', text: 'Judging whether a source, a statistic, or an AI answer can be trusted.' }] },
+    { code: 'parts', text: 'Breaking a messy question into smaller ones you can answer.' },
+    { code: 'numbers', text: 'Using data to support or reject a claim.' },
+    { code: 'sources', text: 'Judging whether a source, a statistic, or an AI answer can be trusted.' }] },
   { code: 'technology2', name: 'Technology', dims: [
-    { code: 'software', name: 'Analyze data in software', text: 'Analyzing data in software such as Excel, R, or Stata.' },
-    { code: 'selfteach', name: 'Teach oneself a tool', text: 'Teaching yourself a new software tool from documentation or videos.' },
-    { code: 'ai', name: 'Use AI openly', text: 'Using AI for schoolwork in a way you could explain openly to a professor or employer.' }] },
+    { code: 'software', text: 'Analyzing data in software such as Excel, R, or Stata.' },
+    { code: 'selfteach', text: 'Teaching yourself a new software tool from documentation or videos.' },
+    { code: 'ai', text: 'Using AI for schoolwork in a way you could explain openly to a professor or employer.' }] },
   { code: 'professionalism2', name: 'Professionalism', dims: [
-    { code: 'deadlines', name: 'Meet deadlines', text: 'Meeting deadlines without last-minute excuses.' },
-    { code: 'check', name: 'Check own work', text: 'Checking your work for errors before you submit it.' },
-    { code: 'email', name: 'Communicate professionally', text: 'Communicating professionally with professors and employers, by email and in person.' }] },
+    { code: 'deadlines', text: 'Meeting deadlines without last-minute excuses.' },
+    { code: 'check', text: 'Checking your work for errors before you submit it.' },
+    { code: 'email', text: 'Communicating professionally with professors and employers, by email and in person.' }] },
   { code: 'career2', name: 'Career and self-development', dims: [
-    { code: 'strengths', name: 'Name own strengths and weaknesses', text: 'Naming your two strongest and two weakest skills for the job you want.' },
-    { code: 'requirements', name: 'Know what the job requires', text: 'Knowing what the job you want requires and what you still lack.' },
-    { code: 'outreach', name: 'Reach out to strangers', text: 'Contacting people you do not know, such as alumni or professionals, to learn about careers.' }] }
+    { code: 'strengths', text: 'Naming your two strongest and two weakest skills for the job you want.' },
+    { code: 'requirements', text: 'Knowing what the job you want requires and what you still lack.' },
+    { code: 'outreach', text: 'Contacting people you do not know, such as alumni or professionals, to learn about careers.' }] }
 ];
 
 
@@ -69,6 +73,6 @@ export const TEXTS = {
 export function defaultSurvey() {
   return { heading: TEXTS.title, intro: { start: TEXTS.intro.start, end: TEXTS.intro.end }, instruction: TEXTS.instruction, prompt: TEXTS.prompt,
            levels: LEVELS.slice(), naLabel: NA_LABEL, unit: { one: UNIT.one, many: UNIT.many },
-           blocks: COMPETENCIES.map(c => ({ id: c.code, name: c.name,
-             items: c.dims.map(d => ({ id: c.code + '.' + d.code, name: d.name, text: d.text, na: false })) })) };
+           blocks: COMPETENCIES.map((c, bk) => ({ id: c.code, name: c.name,
+             items: c.dims.map((d, ik) => ({ id: c.code + '.' + d.code, text: d.text, advice: placeholderAdvice(bk + 1, ik + 1), na: false })) })) };
 }

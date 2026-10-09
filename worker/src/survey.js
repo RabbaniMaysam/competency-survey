@@ -3,14 +3,16 @@
  *
  * State of a class:
  *   { title, created, roster: [{first, last, email}],
- *     survey: the class's own questions and texts (below), retired: [{id, blockName, name, text}] questions removed
+ *     survey: the class's own questions and texts (below), retired: [{id, blockName, text}] questions removed
  *       from the survey (kept so that answers given to them stay labeled on the Responses tab and in the CSV),
  *     code: whether a student types the session code to start a round, codeSec: seconds between session codes,
  *     secret: random string the codes derive from,
  *     rounds: [{id: 'start' | 'end', name, open: bool, closes: ISO time or '', openedAt, closedAt}] }
  *   survey = { heading, intro: {start, end}, instruction, prompt, levels: [five labels, 1 to 5], naLabel: the sixth
- *              option's label, unit: {one, many} (what a section is called), blocks: [{id, name, items: [{id, name, text, na}]}] }
- *   An item's name is its short label for the report (empty: the text is used); na: the item offers the sixth option.
+ *              option's label, unit: {one, many} (what a section is called), blocks: [{id, name, items: [{id, text, advice, na}]}] }
+ *   An item's text is the statement students rate (also its label in the report); advice: what the results page shows a
+ *   student who chose the item's section as a goal and rated the item low (adviceItems); na: the item offers the sixth option.
+ *   (Items had a short label, `name`, until 2026-10-09; upgrade drops it.)
  * A new class starts with the default survey (items.js) or a copy of another class's survey and settings.
  * A round is open while open is true and its closing time (if any) has not passed.
  * A student's answers to a round are one row of the responses table: answers = {itemId: a level, 1 to 5, or 'na'},
@@ -20,7 +22,7 @@
  */
 
 import { canonEmail, parseRoster } from './roster.js';
-import { defaultSurvey, NA_LABEL, NA_LABEL_OLD } from './items.js';
+import { defaultSurvey, NA_LABEL, NA_LABEL_OLD, placeholderAdvice } from './items.js';
 
 export const ROUNDS = [{ id: 'start', name: 'Start of semester' }, { id: 'end', name: 'End of semester' }];
 
@@ -79,6 +81,8 @@ export function checkCode(s, code, nowMs) {
  * Fills fields a class saved by an earlier version lacks (a missing secret is created by the Worker, which writes it back).
  * A class saved before the Questions tab (2026-10-09) receives the default survey; the competencies it had turned
  * off (the list `off`) are left out of it and their questions listed as retired, so the answers given to them stay labeled.
+ * A survey saved before the advice field (2026-10-09) loses its items' short labels, and each item receives the
+ * placeholder advice of its position ("Placeholder advice 2.3": section 2, question 3).
  */
 export function upgrade(s) {
   if (!Array.isArray(s.roster)) s.roster = [];
@@ -88,8 +92,13 @@ export function upgrade(s) {
     s.survey = Object.assign(def, { blocks: def.blocks.filter(b => off.indexOf(b.id) === -1) });
     if (!s.survey.blocks.length) s.survey.blocks = defaultSurvey().blocks;
     defaultSurvey().blocks.filter(b => !s.survey.blocks.some(x => x.id === b.id))
-      .forEach(b => b.items.forEach(i => s.retired.push({ id: i.id, blockName: b.name, name: i.name, text: i.text })));
+      .forEach(b => b.items.forEach(i => s.retired.push({ id: i.id, blockName: b.name, text: i.text })));
   }
+  s.survey.blocks.forEach((b, bk) => b.items.forEach((i, ik) => {
+    delete i.name;
+    if (typeof i.advice !== 'string') i.advice = placeholderAdvice(bk + 1, ik + 1);
+  }));
+  s.retired.forEach(r => { delete r.name; });
   if (s.survey.naLabel === NA_LABEL_OLD) s.survey.naLabel = NA_LABEL;
   delete s.off;
   delete s.version;
@@ -102,11 +111,11 @@ export function upgrade(s) {
 
 export const student = (s, email) => s.roster.find(r => r.email === canonEmail(email)) || null;
 
-/** The questions of a survey in order: {id, block, blockName, name (the short label, or the text), text, na}. */
-export const surveyItems = sv => sv.blocks.flatMap(b => b.items.map(i => ({ id: i.id, block: b.id, blockName: b.name, name: i.name || i.text, text: i.text, na: !!i.na })));
+/** The questions of a survey in order: {id, block, blockName, name (its label: the text), text, advice, na}. */
+export const surveyItems = sv => sv.blocks.flatMap(b => b.items.map(i => ({ id: i.id, block: b.id, blockName: b.name, name: i.text, text: i.text, advice: i.advice || '', na: !!i.na })));
 export const activeItems = s => surveyItems(s.survey);
 /** The survey's questions, then the retired ones (retired: true; na: false), for labeling every stored answer. */
-export const allItems = s => activeItems(s).concat(s.retired.map(r => ({ id: r.id, block: '', blockName: r.blockName, name: r.name || r.text, text: r.text, na: false, retired: true })));
+export const allItems = s => activeItems(s).concat(s.retired.map(r => ({ id: r.id, block: '', blockName: r.blockName, name: r.text, text: r.text, advice: '', na: false, retired: true })));
 
 /** Whether v is a valid answer to the item: a level 1 to 5, or 'na' when the item offers the sixth option. */
 export const validAnswer = (s, item, v) => (v === 'na' ? !!item.na : Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= s.survey.levels.length && String(v).trim() !== '');
@@ -157,6 +166,25 @@ export function blockScores(s, answers) {
   });
 }
 
+/**
+ * The advice the results page shows for each section, from a student's answers: {sectionId: {ids, high}}.
+ * ids: the questions of the section with advice that the student rated low (a level at or below the middle of the
+ * scale, 3 of 5, or the sixth option), lowest first (the sixth option after the levels), at most ADVICE_MAX;
+ * when none is low, the lowest-rated question with advice (high: true). A section without such a question is left out.
+ */
+export const ADVICE_MAX = 3;
+export function adviceItems(s, answers) {
+  const a = answers || {}, mid = Math.ceil(s.survey.levels.length / 2), out = {};
+  const rank = v => (v === 'na' ? s.survey.levels.length + 1 : Number(v));  // the sixth option sorts after every level
+  s.survey.blocks.forEach(b => {
+    const rated = b.items.filter(i => (i.advice || '').trim() && i.id in a && validAnswer(s, i, a[i.id]));
+    const low = rated.filter(i => a[i.id] === 'na' || Number(a[i.id]) <= mid);
+    const pick = (low.length ? low : rated).slice().sort((x, y) => rank(a[x.id]) - rank(a[y.id]));  // stable: survey order on ties
+    if (pick.length) out[b.id] = { ids: pick.slice(0, low.length ? ADVICE_MAX : 1).map(i => i.id), high: !low.length };
+  });
+  return out;
+}
+
 /** The stored goals of a response row that are sections of the survey now (an array of ids, in the survey's order). */
 export function goalsOf(s, row) {
   const g = Array.isArray(row && row.goals) ? row.goals : [];
@@ -194,15 +222,17 @@ export function studentView(s, email, rows, ms) {
     needCode: !!s.code,  // a round is started by typing the session code; a round with a stored row is started
     codeSec: codeSec(s), // seconds between codes (shown in the code field's label)
     goalsMax: GOALS_MAX,
-    // blocks: [{id, name, items: [{id, name, text, na}]}]
-    blocks: sv.blocks.map(b => ({ id: b.id, name: b.name, items: b.items.map(i => ({ id: i.id, name: i.name || i.text, text: i.text, na: !!i.na })) })),
+    // blocks: [{id, name, items: [{id, name (the text), text, advice, na}]}]
+    blocks: sv.blocks.map(b => ({ id: b.id, name: b.name, items: b.items.map(i => ({ id: i.id, name: i.text, text: i.text, advice: i.advice || '', na: !!i.na })) })),
     rounds: s.rounds.map(r => {
       const row = mine(r.id);
       const answers = row ? valid(row.answers) : {};
       return { id: r.id, name: r.name, open: isOpen(r, ms), closes: r.closes, started: !!row, intro: (sv.intro && sv.intro[r.id]) || '',
                answers: answers, saved: row ? row.saved : '', submitted: row ? row.submitted : '',
-               // the results page: the student's score per section (of the submitted answers) and the sections chosen as goals
-               scores: row && row.submitted ? blockScores(s, answers) : [], goals: goalsOf(s, row) };
+               // the results page: the student's score per section (of the submitted answers), the sections chosen as
+               // goals, and the questions whose advice is shown for each section (adviceItems)
+               scores: row && row.submitted ? blockScores(s, answers) : [], goals: goalsOf(s, row),
+               advice: row && row.submitted ? adviceItems(s, answers) : {} };
     })
   };
 }
@@ -210,7 +240,7 @@ export function studentView(s, email, rows, ms) {
 // ---------------------------------------------------------------- the survey's questions
 
 /** Limits of a survey: characters of each text, and counts. */
-export const LIMITS = { heading: 150, intro: 1500, instruction: 1500, prompt: 200, level: 40, unit: 40, block: 120, item: 400, name: 80,
+export const LIMITS = { heading: 150, intro: 1500, instruction: 1500, prompt: 200, level: 40, unit: 40, block: 120, item: 400, advice: 1500,
                         blocks: 40, itemsPerBlock: 40, items: 200 };
 const ID_RE = /^[A-Za-z0-9._-]{1,40}$/;
 
@@ -260,7 +290,7 @@ export function cleanSurvey(raw, s) {
     total += items.length;
     out.blocks.push({ id: idOf(b.id, 's'), name: name, items: items.map((i, ik) => {
       const where = 'Question ' + (ik + 1) + ' of "' + name + '"';
-      return { id: idOf(i && i.id, 'q'), name: field(i && i.name, LIMITS.name, where + ' (short label)'), text: field(i && i.text, LIMITS.item, where, true), na: !!(i && i.na) };
+      return { id: idOf(i && i.id, 'q'), text: field(i && i.text, LIMITS.item, where, true), advice: field(i && i.advice, LIMITS.advice, where + ' (advice)'), na: !!(i && i.na) };
     }) });
   });
   if (total > LIMITS.items) throw new Error('The survey has ' + total + ' questions; the limit is ' + LIMITS.items + '.');
@@ -268,8 +298,8 @@ export function cleanSurvey(raw, s) {
 }
 
 /**
- * What changes from survey a to survey b: questions added, removed, reworded (text changed), and given or deprived of
- * the sixth option (lists of items, as surveyItems), and whether the sections' order or names, the texts, or the scale changed.
+ * What changes from survey a to survey b: questions added, removed, reworded (text changed), with changed advice, and given
+ * or deprived of the sixth option (lists of items, as surveyItems), and whether the sections' order or names, the texts, or the scale changed.
  */
 export function surveyDiff(a, b) {
   const A = surveyItems(a), B = surveyItems(b);
@@ -278,7 +308,7 @@ export function surveyDiff(a, b) {
   return {
     added: B.filter(i => !inA(i.id)), removed: A.filter(i => !inB(i.id)),
     reworded: both.filter(i => inA(i.id).text !== i.text),
-    relabeled: both.filter(i => inA(i.id).text === i.text && inA(i.id).name !== i.name),
+    advised: both.filter(i => inA(i.id).advice !== i.advice),
     naOn: B.filter(i => i.na && !(inA(i.id) && inA(i.id).na)), naOff: both.filter(i => !i.na && inA(i.id).na),
     order: JSON.stringify(A.map(i => i.id)) !== JSON.stringify(B.map(i => i.id)) || JSON.stringify(a.blocks.map(x => x.name)) !== JSON.stringify(b.blocks.map(x => x.name)),
     texts: ['heading', 'instruction', 'prompt'].some(k => a[k] !== b[k]) || JSON.stringify(a.intro) !== JSON.stringify(b.intro) || JSON.stringify(a.unit) !== JSON.stringify(b.unit),
@@ -363,7 +393,7 @@ export const ADMIN = {
    */
   saveSurvey(s, raw) {
     const next = cleanSurvey(raw, s), diff = surveyDiff(s.survey, next);
-    const now = new Set(surveyItems(next).map(i => i.id)), gone = diff.removed.map(i => ({ id: i.id, blockName: i.blockName, name: i.name, text: i.text }));
+    const now = new Set(surveyItems(next).map(i => i.id)), gone = diff.removed.map(i => ({ id: i.id, blockName: i.blockName, text: i.text }));
     s.retired = s.retired.filter(r => !now.has(r.id) && !gone.some(g => g.id === r.id)).concat(gone);
     s.survey = next;
     return diff;
