@@ -23,7 +23,7 @@
  */
 
 import { canonEmail, parseRoster } from './roster.js';
-import { defaultSurvey, NA_LABEL, NA_LABEL_OLD, placeholderAdvice } from './items.js';
+import { defaultSurvey, NA_LABEL, NA_LABEL_OLD, PLACEHOLDER_ADVICE } from './items.js';
 
 export const ROUNDS = [{ id: 'start', name: 'Start of semester' }, { id: 'end', name: 'End of semester' }];
 
@@ -83,7 +83,7 @@ export function checkCode(s, code, nowMs) {
  * A class saved before the Questions tab (2026-10-09) receives the default survey; the competencies it had turned
  * off (the list `off`) are left out of it and their questions listed as retired, so the answers given to them stay labeled.
  * A survey saved before the advice field (2026-10-09) loses its items' short labels, and each item receives the
- * placeholder advice of its position ("Placeholder advice 2.3": section 2, question 3).
+ * placeholder advice; a numbered placeholder of the first version ("Placeholder advice 2.3") loses its number.
  */
 export function upgrade(s) {
   if (!Array.isArray(s.roster)) s.roster = [];
@@ -95,9 +95,9 @@ export function upgrade(s) {
     defaultSurvey().blocks.filter(b => !s.survey.blocks.some(x => x.id === b.id))
       .forEach(b => b.items.forEach(i => s.retired.push({ id: i.id, blockName: b.name, text: i.text })));
   }
-  s.survey.blocks.forEach((b, bk) => b.items.forEach((i, ik) => {
+  s.survey.blocks.forEach(b => b.items.forEach(i => {
     delete i.name;
-    if (typeof i.advice !== 'string') i.advice = placeholderAdvice(bk + 1, ik + 1);
+    if (typeof i.advice !== 'string' || /^Placeholder advice \d+\.\d+$/.test(i.advice.trim())) i.advice = PLACEHOLDER_ADVICE;
   }));
   s.retired.forEach(r => { delete r.name; });
   if (typeof s.survey.showAdvice !== 'boolean') s.survey.showAdvice = true;

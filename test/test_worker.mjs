@@ -100,7 +100,7 @@ const items = r.state.blocks.flatMap(c => c.items.map(d => d.id));
 ok(r.state.name === 'F1 L1' && items.length === 18 && items[0] === 'communication2.present' && r.state.blocks.length === 6 && r.state.rounds.every(x => !x.open) && r.state.levels.length === 5
   && !('version' in r.state) && r.state.naLabel === 'Didn\'t have a chance to try' && r.state.heading === 'Career skills self-assessment' && r.state.prompt && r.state.instruction
   && r.state.rounds[0].intro && r.state.rounds[1].intro && r.state.blocks.every(c => c.items.every(d => d.text && d.na === false))
-  && r.state.blocks[0].items[0].advice === 'Placeholder advice 1.1' && r.state.blocks[5].items[2].advice === 'Placeholder advice 6.3' && Object.keys(r.state.rounds[0].advice).length === 0
+  && r.state.blocks[0].items[0].advice === 'Placeholder advice' && r.state.blocks[5].items[2].advice === 'Placeholder advice' && Object.keys(r.state.rounds[0].advice).length === 0
   && r.state.goalsMax === 3 && r.state.unit.one === 'Competency' && r.state.rounds[0].scores.length === 0 && r.state.rounds[0].goals.length === 0, 'student sees 18 statements, five levels, intros; both rounds closed; no scores or goals yet');
 ok(/closed/.test((await stu(1, 'goals', ['start', ['career2']])).error), 'goals refused while closed');
 ok(/closed/.test((await stu(1, 'save', ['start', { 'career2.strengths': 2 }])).error), 'saving refused while closed');

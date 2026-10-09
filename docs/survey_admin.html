@@ -786,8 +786,8 @@
         drag = null; mark.remove(); render();
       });
     };
-    // a new question, with the placeholder advice of its position (section bk, question ik, both 1-based)
-    var blank = function (bk, ik) { return { id: '', text: '', advice: 'Placeholder advice ' + bk + '.' + ik, na: false }; };
+    // a new question, with the placeholder advice
+    var blank = function () { return { id: '', text: '', advice: 'Placeholder advice', na: false }; };
 
     var save = function () {
       if (!questionsDirty()) { flash = { ok: 'Nothing changed.' }; render(); return; }
@@ -879,7 +879,7 @@
           el('span', { class: 'muted', text: !i.id ? 'new' : k ? k + ' answer' + (k === 1 ? '' : 's') + ' stored' : 'no answers yet' })));
         sec.appendChild(row);
       });
-      var end = el('div', { class: 'row', style: 'margin:6px 0 0' }, button('Add a question', 'plain', function () { var q = blank(bk + 1, b.items.length + 1); b.items.push(q); qFocus = q; render(); }),
+      var end = el('div', { class: 'row', style: 'margin:6px 0 0' }, button('Add a question', 'plain', function () { var q = blank(); b.items.push(q); qFocus = q; render(); }),
         b.items.length ? null : el('span', { class: 'muted', text: 'A ' + U.one.toLowerCase() + ' needs at least one question.' }));
       sec.appendChild(end);
       dropZone(sec, true, b.items, ':scope > .qitem', end);
@@ -889,7 +889,7 @@
     dropZone(secs, false, Q.blocks, ':scope > .qsec', secsEnd);
     card.appendChild(secs);
     card.appendChild(el('div', { class: 'row', style: 'margin-top:12px' }, button('Add a ' + U.one.toLowerCase(), 'plain', function () {
-      var q = blank(Q.blocks.length + 1, 1); Q.blocks.push({ id: '', name: '', items: [q] }); qFocus = q; render();
+      var q = blank(); Q.blocks.push({ id: '', name: '', items: [q] }); qFocus = q; render();
     })));
     card.appendChild(saveRow());
     edited();

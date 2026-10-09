@@ -28,17 +28,21 @@ ok(!('off' in old) && !('version' in old) && old.survey.blocks.length === 5 && !
   'upgrade: the default survey without the blocks turned off; off and version dropped');
 ok(old.retired.map(r => r.id).join() === 'career2.strengths,career2.requirements,career2.outreach' && old.retired.every(r => r.blockName === 'Career and self-development' && !('name' in r) && r.text),
   'upgrade: the questions of a block turned off are retired, with their labels');
-// a class saved before the advice field: the short labels dropped, each question given the placeholder of its position
+// a class saved before the advice field: the short labels dropped, each question given the placeholder;
+// a numbered placeholder of the first version loses its number
 {
   const pre = sv.newClass('x', T0);
   pre.survey.blocks.forEach(b => b.items.forEach(i => { i.name = 'label'; delete i.advice; }));
   pre.survey.blocks[1].items[2].advice = 'Kept.';
+  pre.survey.blocks[2].items[0].advice = 'Placeholder advice 3.1';
+  pre.survey.blocks[2].items[1].advice = 'Placeholder advice 3.2, then practice.';
   pre.retired.push({ id: 'old.q', blockName: 'Old', name: 'old label', text: 'Old question.' });
   sv.upgrade(pre);
-  ok(pre.survey.blocks.every(b => b.items.every(i => !('name' in i))) && pre.survey.blocks[0].items[0].advice === 'Placeholder advice 1.1' && pre.survey.blocks[5].items[2].advice === 'Placeholder advice 6.3'
-    && pre.survey.blocks[1].items[2].advice === 'Kept.' && !('name' in pre.retired[0]) && sv.allItems(pre).slice(-1)[0].name === 'Old question.', 'upgrade: short labels dropped; placeholder advice by position; stored advice kept');
+  ok(pre.survey.blocks.every(b => b.items.every(i => !('name' in i))) && pre.survey.blocks[0].items[0].advice === 'Placeholder advice' && pre.survey.blocks[5].items[2].advice === 'Placeholder advice'
+    && pre.survey.blocks[1].items[2].advice === 'Kept.' && pre.survey.blocks[2].items[0].advice === 'Placeholder advice' && pre.survey.blocks[2].items[1].advice === 'Placeholder advice 3.2, then practice.'
+    && !('name' in pre.retired[0]) && sv.allItems(pre).slice(-1)[0].name === 'Old question.', 'upgrade: short labels dropped; placeholder advice, numbers dropped; stored advice kept');
 }
-ok(DEF.blocks[0].items[0].advice === 'Placeholder advice 1.1' && DEF.blocks[3].items[1].advice === 'Placeholder advice 4.2' && DEF_ITEMS.every(i => i.name === i.text), 'the default advice: placeholders by position; an item\'s label is its statement');
+ok(DEF.blocks.every(b => b.items.every(i => i.advice === 'Placeholder advice')) && DEF_ITEMS.every(i => i.name === i.text), 'the default advice: the placeholder; an item\'s label is its statement');
 ok(sv.allItems(old).length === 18 && sv.allItems(old).slice(15).every(i => i.retired) && sv.activeItems(old).length === 15, 'allItems lists the survey, then the retired questions');
 ok(sv.upgrade({ title: 'x' }).survey.blocks.length === 6 && sv.upgrade({ title: 'x' }).retired.length === 0, 'upgrade: a class without an off list has the full default survey');
 ok(sv.upgrade({ title: 'x', off: COMPETENCIES.map(c => c.code) }).survey.blocks.length === 6, 'upgrade: a class with every block off (not possible before) keeps the full survey');
@@ -136,7 +140,7 @@ ok(v.rounds[0].scores.length === 0 && v.rounds[0].goals.length === 0 && v.rounds
   ok(sv.goalsOf(s, row).join() === 'communication2,thinking2' && sv.goalsOf(s, null).length === 0 && sv.goalsOf(s, { goals: 'x' }).length === 0, 'the goals of a row: the ids in the survey now, in its order');
   const sv2 = sv.studentView(s, 'bo@montclair.edu', [row], T0);
   ok(sv2.rounds[0].goals.join() === 'communication2,thinking2' && sv2.rounds[0].scores.length === 6 && near(sv2.rounds[0].scores[0].score, 2.5) && sv2.rounds[0].scores[0].na === 1, 'the student view sends the submitted round\'s scores and goals');
-  ok(sv2.rounds[0].advice.professionalism2 && sv2.blocks[0].items[0].advice === 'Placeholder advice 1.1', 'the student view sends the advice and the questions it applies to');
+  ok(sv2.rounds[0].advice.professionalism2 && sv2.blocks[0].items[0].advice === 'Placeholder advice', 'the student view sends the advice and the questions it applies to');
   const off = JSON.parse(JSON.stringify(s.survey)); off.blocks[0].items[0].na = false; sv.ADMIN.saveSurvey(s, off);
 }
 
@@ -166,7 +170,7 @@ ok(v.rounds[0].scores.length === 0 && v.rounds[0].goals.length === 0 && v.rounds
   const offA = JSON.parse(JSON.stringify(q.survey)); offA.showAdvice = false;
   const dOff = sv.ADMIN.saveSurvey(q, offA), vOff = sv.studentView(q, 'a@x.edu', row, T0);
   ok(q.survey.showAdvice === false && dOff.adviceShown === 'off' && dOff.advised.length === 0 && vOff.showAdvice === false && Object.keys(vOff.rounds[0].advice).length === 0
-    && vOff.blocks.every(b => b.items.every(i => i.advice === '')) && q.survey.blocks[4].items[0].advice === 'Placeholder advice 5.1', 'advice turned off: none sent, the texts kept');
+    && vOff.blocks.every(b => b.items.every(i => i.advice === '')) && q.survey.blocks[4].items[0].advice === 'Placeholder advice', 'advice turned off: none sent, the texts kept');
   const onA = JSON.parse(JSON.stringify(q.survey)); delete onA.showAdvice;
   ok(sv.ADMIN.saveSurvey(q, onA).adviceShown === 'on' && q.survey.showAdvice === true, 'a survey sent without the setting shows the advice');
   ok(sv.upgrade({ title: 'x' }).survey.showAdvice === true && sv.upgrade({ title: 'x', survey: Object.assign(sv.newClass('y', T0).survey, { showAdvice: false }) }).survey.showAdvice === false, 'upgrade: on unless turned off');

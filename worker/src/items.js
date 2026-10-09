@@ -3,7 +3,7 @@
  * rated for confidence on the five LEVELS. Each class keeps its own copy (defaultSurvey), which the instructor
  * edits on the Questions tab (see survey.js). A dimension's `text` is the statement the student rates; its advice
  * is shown on the results page to a student who chose its competency as a goal and rated the statement low
- * (placeholders "Placeholder advice 1.1" to "6.3" until the real advice is written; placeholderAdvice).
+ * (the placeholder "Placeholder advice" until the real advice is written; PLACEHOLDER_ADVICE).
  *
  * A default item's id is competency code + '.' + dimension code (for example 'career2.outreach'); ids are stored
  * with the answers, so an item keeps its id when edited. (The codes end in 2 because an earlier, longer survey
@@ -21,8 +21,9 @@ export const NA_LABEL_OLD = 'No chance to try';
 /** What a section is called on the instructor page and in the report. */
 export const UNIT = { one: 'Competency', many: 'Competencies' };
 
-/** The placeholder advice of question q (1-based) of section b (1-based). */
-export const placeholderAdvice = (b, q) => 'Placeholder advice ' + b + '.' + q;
+/** The advice of a question until the instructor writes it. (Until 2026-10-09 it was numbered by position,
+ * "Placeholder advice 2.3"; survey.js upgrade drops the number.) */
+export const PLACEHOLDER_ADVICE = 'Placeholder advice';
 
 export const COMPETENCIES = [
   { code: 'communication2', name: 'Communication', dims: [
@@ -73,6 +74,6 @@ export const TEXTS = {
 export function defaultSurvey() {
   return { heading: TEXTS.title, intro: { start: TEXTS.intro.start, end: TEXTS.intro.end }, instruction: TEXTS.instruction, prompt: TEXTS.prompt,
            levels: LEVELS.slice(), naLabel: NA_LABEL, unit: { one: UNIT.one, many: UNIT.many }, showAdvice: true,
-           blocks: COMPETENCIES.map((c, bk) => ({ id: c.code, name: c.name,
-             items: c.dims.map((d, ik) => ({ id: c.code + '.' + d.code, text: d.text, advice: placeholderAdvice(bk + 1, ik + 1), na: false })) })) };
+           blocks: COMPETENCIES.map(c => ({ id: c.code, name: c.name,
+             items: c.dims.map(d => ({ id: c.code + '.' + d.code, text: d.text, advice: PLACEHOLDER_ADVICE, na: false })) })) };
 }

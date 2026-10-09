@@ -122,8 +122,7 @@
     .goalrow .count { color: var(--muted); flex: 1; }
     button.go.brown { background: #4a3322; }
     .goal { margin-top: 14px; padding: 2px 0 2px 14px; border-left: 4px solid #4a3322; }
-    .goal h3 { margin: 0; font-size: 17px; display: flex; align-items: center; gap: 8px; }
-    .goal h3 .sc { font-size: 13px; font-weight: 600; color: var(--muted); background: #f0f2f5; padding: 2px 8px; border-radius: 10px; }
+    .goal h3 { margin: 0; font-size: 17px; }
     .goal .why { margin: 6px 0 0; color: var(--muted); }
     .tip { margin-top: 10px; }
     .tip .stmt { margin: 0; }
@@ -663,13 +662,12 @@
   }
 
   /**
-   * One chosen goal: the section's name and score, then the advice of the statements the Worker picked (a: {ids, high};
+   * One chosen goal: the section's name, then the advice of the statements the Worker picked (a: {ids, high};
    * ids lowest-rated first), each as a sentence on the student's answer and the advice after "A good way to improve it is to".
    * high: every statement was rated above the middle of the scale.
    */
   function goalAdvice(r, b, a) {
-    var x = r.scores.filter(function (s) { return s.id === b.id; })[0];
-    var box = el('div', { class: 'goal' }, el('h3', {}, el('span', { text: b.name }), x && x.score !== null ? el('span', { class: 'sc', text: f1(x.score) }) : null));
+    var box = el('div', { class: 'goal' }, el('h3', { text: b.name }));
     if (!a || !a.ids.length) return box;
     var L = S.levels.length;
     if (a.high) box.appendChild(el('p', { class: 'why', text: 'You rated every statement here ' + (Math.ceil(L / 2) + 1) + ' or higher. The one you rated lowest:' }));
