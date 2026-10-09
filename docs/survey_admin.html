@@ -90,11 +90,12 @@
     .qsec { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 12px; background: #fbfbfc; }
     .qsec > .row b { white-space: nowrap; }
     /* a question: handle, number, statement and advice side by side, then its controls */
-    .qitem, .qcols { display: grid; grid-template-columns: 18px 24px minmax(0, 1fr) minmax(0, 1fr); gap: 4px 10px; align-items: start; }
+    .qitem, .qcols { display: grid; grid-template-columns: 18px 24px minmax(0, 1fr) minmax(0, 1fr) 128px; gap: 4px 10px; align-items: start; }
     .qitem { padding: 8px 0; border-top: 1px dashed var(--line); background: #fbfbfc; }
     .qcols + .qitem { border-top: 0; }
-    .qitem > textarea { width: 100%; resize: vertical; }
-    .qitem > .row { grid-column: 3 / 5; margin: 0; }
+    .qitem > textarea { width: 100%; resize: vertical; align-self: stretch; }
+    .qctl { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 13px; }
+    .qctl .muted { line-height: 1.2; }
     .qcols { font-size: 13px; color: var(--muted); padding-top: 4px; }
     .qcols > span:first-child { grid-column: 3; }
     .qnum { padding-top: 5px; color: var(--muted); font-weight: 600; }
@@ -105,7 +106,8 @@
     .qmark { height: 0; border-top: 3px solid var(--accent); border-radius: 2px; margin: -1px 0; }
     @media (max-width: 760px) {
       .qitem { grid-template-columns: 18px 24px minmax(0, 1fr); }
-      .qitem > textarea.qadv, .qitem > .row { grid-column: 3; }
+      .qitem > textarea.qadv, .qitem > .qctl { grid-column: 3; }
+      .qctl { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
       .qcols { display: none; }
     }
     .qtexts { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
@@ -864,7 +866,7 @@
         row.appendChild(el('span', { class: 'qnum', text: (ik + 1) + '.' }));
         row.appendChild(field(i, 'text', { class: 'qtext', 'aria-label': 'Statement', maxlength: 400, placeholder: 'the statement students rate' }, 2));
         row.appendChild(field(i, 'advice', { class: 'qadv', 'aria-label': 'Advice', maxlength: 1500, placeholder: 'advice; empty: none' }, 2));
-        row.appendChild(el('div', { class: 'row' },
+        row.appendChild(el('div', { class: 'qctl' },
           el('label', { title: 'Adds "' + Q.naLabel + '" to this question' }, na, 'sixth option'),
           small('Remove', 'Remove this question', function () { b.items.splice(ik, 1); render(); }),
           el('span', { class: 'muted', text: !i.id ? 'new' : k ? k + ' answer' + (k === 1 ? '' : 's') + ' stored' : 'no answers yet' })));
