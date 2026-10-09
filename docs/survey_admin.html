@@ -89,13 +89,25 @@
     button.small { padding: 1px 8px; font-size: 13px; }
     .qsec { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 12px; background: #fbfbfc; }
     .qsec > .row b { white-space: nowrap; }
-    .qitem { display: flex; gap: 8px; padding: 8px 0; border-top: 1px dashed var(--line); }
-    .qitem:first-of-type { border-top: 0; }
-    .qnum { min-width: 24px; padding-top: 5px; color: var(--muted); font-weight: 600; }
-    .qbody { flex: 1; min-width: 0; }
-    .qbody textarea { width: 100%; resize: vertical; }
-    .qadvice { display: block; margin-top: 4px; }
-    .qadvice > span { display: block; font-size: 0.9em; color: var(--muted); }
+    /* a question: handle, number, statement and advice side by side, then its controls */
+    .qitem, .qcols { display: grid; grid-template-columns: 18px 24px minmax(0, 1fr) minmax(0, 1fr); gap: 4px 10px; align-items: start; }
+    .qitem { padding: 8px 0; border-top: 1px dashed var(--line); background: #fbfbfc; }
+    .qcols + .qitem { border-top: 0; }
+    .qitem > textarea { width: 100%; resize: vertical; }
+    .qitem > .row { grid-column: 3 / 5; margin: 0; }
+    .qcols { font-size: 13px; color: var(--muted); padding-top: 4px; }
+    .qcols > span:first-child { grid-column: 3; }
+    .qnum { padding-top: 5px; color: var(--muted); font-weight: 600; }
+    .qhandle { padding: 4px 0; color: #9aa3ad; font-size: 16px; line-height: 1; cursor: grab; user-select: none; border-radius: 4px; }
+    .qhandle:hover, .qhandle:focus-visible { color: var(--accent); }
+    .qhandle.off { opacity: .4; cursor: default; }
+    .dragging { opacity: .4; }
+    .qmark { height: 0; border-top: 3px solid var(--accent); border-radius: 2px; margin: -1px 0; }
+    @media (max-width: 760px) {
+      .qitem { grid-template-columns: 18px 24px minmax(0, 1fr); }
+      .qitem > textarea.qadv, .qitem > .row { grid-column: 3; }
+      .qcols { display: none; }
+    }
     .qtexts { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
     .qtexts summary { cursor: pointer; }
     .qgrid { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 6px 10px; align-items: start; margin-top: 8px; }
@@ -443,7 +455,7 @@
     });
   }
   // Unsaved edits on the Questions tab: qDraft, a copy of the class's survey edited in place, kept across redraws.
-  var qDraft = null, qTextsOpen = false, qFocus = null;
+  var qDraft = null, qTextsOpen = false, qFocus = null, qGrab = null;  // qGrab: the question or section whose handle keeps the focus after a move by key
   function copyOf(o) { return JSON.parse(JSON.stringify(o)); }
   function questionsDirty() { return !!(qDraft && D && JSON.stringify(qDraft) !== JSON.stringify(D.state.survey)); }
   function saveQuestions() {
@@ -723,6 +735,54 @@
     };
     var small = function (label, title, fn) { return el('button', { class: 'plain small', text: label, title: title, 'aria-label': title, disabled: busy, on: { click: fn } }); };
     var move = function (arr, k, d) { var j = k + d; if (j < 0 || j >= arr.length) return; var t = arr[k]; arr[k] = arr[j]; arr[j] = t; render(); };
+    // Reordering: a question or a section is dragged by its handle (⠿) and dropped where a blue line marks the place; a
+    // question can be dropped into another section. With the handle focused, the arrow keys move it up or down.
+    var drag = null, mark = el('div', { class: 'qmark' });
+    /** The handle of row (a question or a section): obj, at position k of arr (b.items or Q.blocks). */
+    var grab = function (title, arr, k, obj, row) {
+      // a span, not a button: Firefox starts no drag from a button
+      var h = el('span', { class: 'qhandle' + (busy ? ' off' : ''), role: 'button', tabindex: busy ? null : '0', text: '⠿', title: title + ': drag, or press ↑ or ↓', 'aria-label': title + ' (arrow keys)' });
+      h.addEventListener('mousedown', function () { if (!busy) row.draggable = true; });
+      h.addEventListener('mouseup', function () { row.draggable = false; });
+      h.addEventListener('keydown', function (e) {
+        var d = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+        if (d && !busy) { e.preventDefault(); qGrab = obj; move(arr, k, d); }
+      });
+      if (qGrab === obj) { qGrab = null; setTimeout(function () { h.focus(); }, 0); }
+      row.addEventListener('dragstart', function (e) {
+        if (!row.draggable) return;
+        e.stopPropagation();
+        drag = { arr: arr, obj: obj, item: arr !== Q.blocks };
+        e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', '');
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragend', function () { row.draggable = false; row.classList.remove('dragging'); drag = null; mark.remove(); });
+      return h;
+    };
+    /** zone accepts dropped questions (isItem; list = its section's items) or sections (list = Q.blocks); its rows: the children matching sel; end: the element the line marks for the last place when the zone has no rows. */
+    var dropZone = function (zone, isItem, list, sel, end) {
+      // the place among the zone's rows before which the dragged one goes, from the pointer's height
+      var at = function (y) {
+        var rows = Array.from(zone.querySelectorAll(sel)), k = 0;
+        while (k < rows.length) { var r = rows[k].getBoundingClientRect(); if (y < r.top + r.height / 2) break; k++; }
+        return { k: k, rows: rows };
+      };
+      zone.addEventListener('dragover', function (e) {
+        if (!drag || drag.item !== isItem) return;
+        e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move';
+        var p = at(e.clientY);
+        if (p.k < p.rows.length) p.rows[p.k].before(mark); else if (p.rows.length) p.rows[p.rows.length - 1].after(mark); else end.before(mark);
+      });
+      zone.addEventListener('dragleave', function (e) { if (!zone.contains(e.relatedTarget)) mark.remove(); });
+      zone.addEventListener('drop', function (e) {
+        if (!drag || drag.item !== isItem) return;
+        e.preventDefault(); e.stopPropagation();
+        var k = at(e.clientY).k, from = drag.arr.indexOf(drag.obj);
+        if (drag.arr === list && from < k) k--;  // the dragged row was counted above the place
+        drag.arr.splice(from, 1); list.splice(k, 0, drag.obj);
+        drag = null; mark.remove(); render();
+      });
+    };
     // a new question, with the placeholder advice of its position (section bk, question ik, both 1-based)
     var blank = function (bk, ik) { return { id: '', text: '', advice: 'Placeholder advice ' + bk + '.' + ik, na: false }; };
 
@@ -740,6 +800,7 @@
       + 'Tick "sixth option" on a question to add "' + Q.naLabel + '" to it: the answer is stored as NA and left out of the report\'s means and changes. '
       + 'A question\'s advice is shown on the results page to a student who chose its ' + U.one.toLowerCase() + ' as a goal and rated the question 3 or lower (or the sixth option); '
       + 'when the student rated every question of it 4 or 5, the advice of the lowest-rated one is shown. '
+      + 'Drag a question or a ' + U.one.toLowerCase() + ' by its handle (⠿) to reorder it; a question can also be dragged into another ' + U.one.toLowerCase() + '. '
       + 'Changing a question\'s wording keeps the answers given to it; to ask something else, remove the question and add a new one. '
       + 'A removed question keeps its answers (the Responses tab and the CSV list them as removed). Nothing changes for students until you Save.' }));
     if (anyOpen) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'A survey is open. Change the questions before opening a survey where possible.' }));
@@ -781,37 +842,43 @@
     card.appendChild(texts);
 
     // the sections and their questions
+    var secs = el('div', { class: 'qsecs' }), secsEnd = el('div');
     Q.blocks.forEach(function (b, bk) {
       var sec = el('div', { class: 'qsec' });
       var n = b.items.reduce(function (t, i) { return t + (counts[i.id] || 0); }, 0);
-      sec.appendChild(el('div', { class: 'row' }, el('b', { text: U.one + ' ' + (bk + 1) }), field(b, 'name', { size: 40, maxlength: 120, placeholder: 'name' }),
-        small('↑', 'Move this ' + U.one.toLowerCase() + ' up', function () { move(Q.blocks, bk, -1); }),
-        small('↓', 'Move this ' + U.one.toLowerCase() + ' down', function () { move(Q.blocks, bk, 1); }),
+      sec.appendChild(el('div', { class: 'row' }, grab('Move this ' + U.one.toLowerCase(), Q.blocks, bk, b, sec),
+        el('b', { text: U.one + ' ' + (bk + 1) }), field(b, 'name', { size: 40, maxlength: 120, placeholder: 'name' }),
         small('Remove', 'Remove this ' + U.one.toLowerCase(), function () {
           ask('Remove ' + (b.name || U.one.toLowerCase() + ' ' + (bk + 1)) + '?', ['Its ' + b.items.length + ' question' + (b.items.length === 1 ? '' : 's') + ' leave the editor.'
             + (n ? ' The ' + n + ' answers given to them stay stored after you Save.' : ''), 'Nothing changes for students until you Save.'], 'Remove', true).then(function (yes) {
             if (yes) { Q.blocks.splice(bk, 1); render(); }
           });
         })));
+      if (b.items.length) sec.appendChild(el('div', { class: 'qcols' }, el('span', { text: 'Statement students rate' }),
+        el('span', { text: 'Advice, shown on the results page to a student who chose this ' + U.one.toLowerCase() + ' and rated the statement 3 or lower' })));
       b.items.forEach(function (i, ik) {
         var na = el('input', { type: 'checkbox' }); na.checked = !!i.na;
         na.addEventListener('change', function () { i.na = na.checked; edited(); });
-        var k = counts[i.id] || 0;
-        sec.appendChild(el('div', { class: 'qitem' }, el('span', { class: 'qnum', text: (ik + 1) + '.' }),
-          el('div', { class: 'qbody' }, field(i, 'text', { maxlength: 400, placeholder: 'the statement students rate' }, 2),
-            el('label', { class: 'qadvice' }, el('span', { text: 'Advice' }),
-              field(i, 'advice', { maxlength: 1500, placeholder: 'shown to a student who chose this ' + U.one.toLowerCase() + ' and rated this question low; empty: none' }, 2)),
-            el('div', { class: 'row', style: 'margin:4px 0 0' },
-              el('label', { title: 'Adds "' + Q.naLabel + '" to this question' }, na, 'sixth option'),
-              small('↑', 'Move this question up', function () { move(b.items, ik, -1); }),
-              small('↓', 'Move this question down', function () { move(b.items, ik, 1); }),
-              small('Remove', 'Remove this question', function () { b.items.splice(ik, 1); render(); }),
-              el('span', { class: 'muted', text: !i.id ? 'new' : k ? k + ' answer' + (k === 1 ? '' : 's') + ' stored' : 'no answers yet' })))));
+        var k = counts[i.id] || 0, row = el('div', { class: 'qitem' });
+        row.appendChild(grab('Move this question', b.items, ik, i, row));
+        row.appendChild(el('span', { class: 'qnum', text: (ik + 1) + '.' }));
+        row.appendChild(field(i, 'text', { class: 'qtext', 'aria-label': 'Statement', maxlength: 400, placeholder: 'the statement students rate' }, 2));
+        row.appendChild(field(i, 'advice', { class: 'qadv', 'aria-label': 'Advice', maxlength: 1500, placeholder: 'advice; empty: none' }, 2));
+        row.appendChild(el('div', { class: 'row' },
+          el('label', { title: 'Adds "' + Q.naLabel + '" to this question' }, na, 'sixth option'),
+          small('Remove', 'Remove this question', function () { b.items.splice(ik, 1); render(); }),
+          el('span', { class: 'muted', text: !i.id ? 'new' : k ? k + ' answer' + (k === 1 ? '' : 's') + ' stored' : 'no answers yet' })));
+        sec.appendChild(row);
       });
-      sec.appendChild(el('div', { class: 'row', style: 'margin:6px 0 0' }, button('Add a question', 'plain', function () { var q = blank(bk + 1, b.items.length + 1); b.items.push(q); qFocus = q; render(); }),
-        b.items.length ? null : el('span', { class: 'muted', text: 'A ' + U.one.toLowerCase() + ' needs at least one question.' })));
-      card.appendChild(sec);
+      var end = el('div', { class: 'row', style: 'margin:6px 0 0' }, button('Add a question', 'plain', function () { var q = blank(bk + 1, b.items.length + 1); b.items.push(q); qFocus = q; render(); }),
+        b.items.length ? null : el('span', { class: 'muted', text: 'A ' + U.one.toLowerCase() + ' needs at least one question.' }));
+      sec.appendChild(end);
+      dropZone(sec, true, b.items, ':scope > .qitem', end);
+      secs.appendChild(sec);
     });
+    secs.appendChild(secsEnd);
+    dropZone(secs, false, Q.blocks, ':scope > .qsec', secsEnd);
+    card.appendChild(secs);
     card.appendChild(el('div', { class: 'row', style: 'margin-top:12px' }, button('Add a ' + U.one.toLowerCase(), 'plain', function () {
       var q = blank(Q.blocks.length + 1, 1); Q.blocks.push({ id: '', name: '', items: [q] }); qFocus = q; render();
     })));
@@ -823,7 +890,7 @@
   function questionChanges(a, b) {
     var flat = function (sv) {
       var out = [];
-      sv.blocks.forEach(function (bl) { bl.items.forEach(function (i) { out.push({ id: i.id, block: bl.name, name: i.text.trim(), text: i.text.trim(), advice: (i.advice || '').trim(), na: !!i.na }); }); });
+      sv.blocks.forEach(function (bl) { bl.items.forEach(function (i) { out.push({ id: i.id, block: bl.name, bid: bl.id, name: i.text.trim(), text: i.text.trim(), advice: (i.advice || '').trim(), na: !!i.na }); }); });
       return out;
     };
     var A = flat(a), B = flat(b);
@@ -838,6 +905,8 @@
     add(removed, 'Removed; their answers stay stored');
     add(reworded, 'Reworded; their answers stay attached');
     add(B.filter(function (i) { var o = old(i.id); return o && o.advice !== i.advice; }), 'Advice changed');
+    var one = ((b.unit && b.unit.one) || 'section').toLowerCase();
+    add(B.filter(function (i) { var o = old(i.id); return o && o.bid !== i.bid; }), 'Moved to another ' + one + '; their answers count toward the new ' + one);
     add(B.filter(function (i) { var o = old(i.id); return i.na && !(o && o.na); }), 'Sixth option added');
     add(B.filter(function (i) { var o = old(i.id); return !i.na && o && o.na; }), 'Sixth option removed; NA answers to them no longer count as answers');
     if (JSON.stringify(a.blocks.map(function (x) { return x.name.trim(); })) !== JSON.stringify(b.blocks.map(function (x) { return x.name.trim(); }))) lines.push('Sections renamed, added, removed, or reordered.');
