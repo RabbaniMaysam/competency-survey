@@ -1,10 +1,10 @@
 // Tests the Worker end to end against a local copy (sign-in check, storage, every action of both pages).
 // It signs its own test tokens and serves the matching public key, so no Google account is involved.
 //
-//   cd worker
-//   npx wrangler d1 execute competency-survey --local --file schema.sql
-//   npx wrangler dev --port 8791 --var GOOGLE_CLIENT_ID:test-client --var ADMIN_EMAILS:prof@gmail.com --var GOOGLE_CERTS_URL:http://127.0.0.1:8799/certs --var SESSION_SECRET:test-secret
-//   node ../test/test_worker.mjs        (in a second terminal)
+//   cd worker      (wrangler = C:\Users\rabba\tools\wrangler\node_modules\.bin\wrangler; npx's cached copy broke on 2026-10-09)
+//   wrangler d1 execute competency-survey --local --file schema.sql
+//   wrangler dev --port 8791 --var GOOGLE_CLIENT_ID:test-client --var ADMIN_EMAILS:prof@gmail.com --var GOOGLE_CERTS_URL:http://127.0.0.1:8799/certs --var SESSION_SECRET:test-secret
+//   node ../test/test_worker.mjs        (in a second terminal; another port: API=http://127.0.0.1:PORT node ../test/test_worker.mjs)
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -65,8 +65,9 @@ ok(r.ok && r.data.key === K && (await (await fetch(API + '/config')).json()).cla
 ok(/exists/.test((await adm('createClass', [K, 'again'], '')).error), 'duplicate class key refused');
 ok(/lowercase/.test((await adm('createClass', ['Bad Key!', 'x'], '')).error), 'bad class key refused');
 r = await adm('get');
-ok(r.ok && r.data.state.off.length === 0 && !('version' in r.data.state) && !('versions' in r.data) && !('defaultVersion' in r.data) && r.data.items.length === 18
-  && r.data.competencies.length === 6 && r.data.levels.length === 5 && r.data.open.length === 0, 'new class: every competency on, nothing open; 18 items, five levels, no versions');
+ok(r.ok && !('off' in r.data.state) && !('version' in r.data.state) && r.data.state.survey.blocks.length === 6 && r.data.state.retired.length === 0 && r.data.items.length === 18
+  && r.data.defaultSurvey.blocks.length === 6 && r.data.state.survey.levels.length === 5 && r.data.open.length === 0, 'new class: the default survey, nothing open; 18 questions, five levels');
+ok(/create class/.test((await adm('log', ['create class', 'all', 5])).data.rows[0].action) && /default questions$/.test((await adm('log', ['create class', 'all', 5])).data.rows[0].detail), 'the creation logged with the default questions');
 ok((await adm('saveSettings', [{ version: '1' }])).ok && !('version' in (await adm('get')).data.state), 'a version sent by an old page is ignored');
 r = await adm('importRoster', ['first,last,email\nF1,L1,' + m(1) + '\nF2,L2,' + m(2) + '\nF3,L3,' + m(3)]);
 ok(r.ok && r.data.state.roster.length === 3, 'roster imported');
@@ -93,12 +94,12 @@ await bad('s1.' + Buffer.from(JSON.stringify({ e: 'prof@gmail.com', x: sPayload.
 await bad(sp[0] + '.' + sp[1] + '.' + sp[2].slice(0, -2) + 'AA', 'session token with a bad signature');
 ok(/not an instructor/.test((await post('/admin', { token: sess, class: K, action: 'whoami' })).error), 'a student session cannot use the instructor API');
 
-// the student view: 18 statements in 6 competencies, five levels, both rounds closed
+// the student view: 18 statements in 6 sections, five levels, both rounds closed
 r = await stu(1, 'state');
-const items = r.state.competencies.flatMap(c => c.dims.map(d => c.code + '.' + d.code));
-ok(r.state.name === 'F1 L1' && items.length === 18 && r.state.competencies.length === 6 && r.state.rounds.every(x => !x.open) && r.state.levels.length === 5
-  && !('version' in r.state) && !('na' in r.state) && r.state.heading === 'Career skills self-assessment' && r.state.prompt && r.state.instruction
-  && r.state.rounds[0].intro && r.state.rounds[1].intro && r.state.competencies.every(c => c.dims.every(d => d.text)), 'student sees 18 statements, five levels, intros; both rounds closed');
+const items = r.state.blocks.flatMap(c => c.items.map(d => d.id));
+ok(r.state.name === 'F1 L1' && items.length === 18 && items[0] === 'communication2.present' && r.state.blocks.length === 6 && r.state.rounds.every(x => !x.open) && r.state.levels.length === 5
+  && !('version' in r.state) && r.state.naLabel === 'No chance to try' && r.state.heading === 'Career skills self-assessment' && r.state.prompt && r.state.instruction
+  && r.state.rounds[0].intro && r.state.rounds[1].intro && r.state.blocks.every(c => c.items.every(d => d.text && d.na === false)), 'student sees 18 statements, five levels, intros; both rounds closed');
 ok(/closed/.test((await stu(1, 'save', ['start', { 'career2.strengths': 2 }])).error), 'saving refused while closed');
 
 // open the start round; draft, submit, change
@@ -123,9 +124,11 @@ ok((await stu(1, 'unlock', ['start', good])).ok, 'typing the code again is harml
 r = await stu(1, 'save', ['start', { 'career2.strengths': '5', 'career.strengths': 3 }]);
 ok(r.ok && r.state.rounds[0].answers['career2.strengths'] === 5 && !('career.strengths' in r.state.rounds[0].answers) && r.state.rounds[0].saved && !r.state.rounds[0].submitted, 'draft saved; an answer to an item of the removed survey dropped');
 ok(/not valid/.test((await stu(1, 'save', ['start', { 'career2.strengths': 6 }])).error), 'level 6 refused');
-ok(/not valid/.test((await stu(1, 'save', ['start', { 'career2.strengths': 'na' }])).error), 'N/A refused');
+r = await stu(1, 'save', ['start', { 'career2.strengths': 'na' }]);
+ok(r.ok && !('career2.strengths' in r.state.rounds[0].answers), 'the sixth option to a question without it is dropped');
 r = await stu(1, 'submit', ['start', { 'career2.strengths': 2 }]);
-ok(/17 items have no answer/.test(r.error) && !/N\/A/.test(r.error), 'incomplete submission refused without mentioning N/A');
+ok(/^17 questions have no answer\.$/.test(r.error), 'incomplete submission refused');
+ok(/^One question has no answer: /.test((await stu(1, 'submit', ['start', Object.fromEntries(items.slice(1).map(id => [id, 3]))])).error), 'one missing answer named');
 const all = {}; items.forEach((id, k) => { all[id] = (k % 5) + 1; });
 r = await stu(1, 'submit', ['start', all]);
 const first = r.state && r.state.rounds[0].submitted;
@@ -148,26 +151,47 @@ r = await adm('saveSettings', [{ code: false }]);
 ok(r.ok && r.data.state.code === false && (await stu(2, 'state')).state.needCode === false, 'session code turned off');
 ok((await stu(2, 'save', ['start', { 'career2.strengths': 1 }])).ok, 'without the code requirement a student saves directly');
 
-// teamwork turned off: student 1 resubmits without it and the teamwork answers are kept
-r = await adm('saveSettings', [{ title: 'Survey test 2', off: ['teamwork2'] }]);
-ok(r.ok && r.data.state.off.join() === 'teamwork2' && r.data.state.title === 'Survey test 2', 'teamwork turned off');
-ok((await stu(1, 'state')).state.competencies.length === 5, 'student now sees 5 competencies');
-ok((await adm('log', ['save settings', 'instructor', 5])).data.rows[0].detail.indexOf('turned off: Teamwork') !== -1, 'the competency turned off is logged by name');
+// the questions: teamwork removed and the sixth option added to the first question while open; student 1 resubmits
+// without teamwork and the teamwork answers are kept
+const S0 = (await adm('get')).data.state.survey, clone = o => JSON.parse(JSON.stringify(o));
+ok((await adm('saveSettings', [{ title: 'Survey test 2', off: ['teamwork2'] }])).ok && (await stu(1, 'state')).state.blocks.length === 6, 'an off list sent by an old page is ignored');
+const ed = clone(S0); ed.blocks = ed.blocks.filter(b => b.id !== 'teamwork2'); ed.blocks[0].items[0].na = true;
+r = await adm('saveSurvey', [ed]);
+ok(r.ok && r.data.state.survey.blocks.length === 5 && r.data.state.retired.map(x => x.id).join() === S0.blocks.find(b => b.id === 'teamwork2').items.map(i => i.id).join()
+  && r.data.items.length === 18 && r.data.items.filter(i => i.retired).length === 3 && r.data.state.title === 'Survey test 2', 'teamwork removed: its questions retired, still listed for the answers');
+let st = (await stu(1, 'state')).state;
+ok(st.blocks.length === 5 && st.blocks[0].items[0].na === true && !('teamwork2.share' in st.rounds[0].answers),'student now sees 5 sections and the sixth option on the first question');
+const ql = (await adm('log', ['save questions', 'instructor', 5])).data.rows[0].detail;
+ok(/^15 questions in 5 sections; removed: Teamwork and leadership: /.test(ql) && /sixth option added: Communication: /.test(ql), 'the change is logged by name: ' + ql);
+ok(/has no questions/.test((await adm('saveSurvey', [Object.assign(clone(S0), { blocks: [{ id: '', name: 'Empty', items: [] }] })])).error) && (await adm('get')).data.state.survey.blocks.length === 5, 'an empty section refused; nothing changed');
 const noTeam = {}; items.filter(id => !/^teamwork2\./.test(id)).forEach(id => { noTeam[id] = all[id]; });
 ok((await stu(1, 'submit', ['start', noTeam])).ok, 'resubmitted without the teamwork items');
 r = await adm('get');
 const row1 = r.data.responses.find(x => x.email === m(1) && x.round === 'start');
-ok(row1.answers['teamwork2.share'] === all['teamwork2.share'] && Object.keys(row1.answers).length === 18, 'answers to a competency turned off are kept on later submissions');
-r = await adm('saveSettings', [{ off: [] }]);
-ok(r.ok && r.data.state.off.length === 0 && (await stu(1, 'state')).state.competencies.length === 6, 'teamwork turned on again');
-ok(/at least one/i.test((await adm('saveSettings', [{ off: r.data.competencies.map(c => c.code) }])).error), 'turning every competency off refused');
-ok(/Unknown competency/.test((await adm('saveSettings', [{ off: ['equity'] }])).error), 'a competency of the removed survey refused');
-ok(/Unknown competency/.test((await adm('saveSettings', [{ off: ['nope'] }])).error), 'unknown competency refused');
+ok(row1.answers['teamwork2.share'] === all['teamwork2.share'] && Object.keys(row1.answers).length === 18, 'answers to removed questions are kept on later submissions');
+r = await stu(2, 'save', ['start', { [items[0]]: 'na' }]);
+ok(r.ok && r.state.rounds[0].answers[items[0]] === 'na', 'the sixth option saved where offered');
+ok(/^14 questions have no answer\.$/.test((await stu(2, 'submit', ['start', { [items[0]]: 'na' }])).error), 'the sixth option counts as an answer');
+r = await adm('saveSurvey', [S0]);
+ok(r.ok && r.data.state.survey.blocks.length === 6 && r.data.state.retired.length === 0 && (await stu(1, 'state')).state.blocks.length === 6, 'teamwork back with its ids; nothing retired');
+st = (await stu(2, 'state')).state;
+ok(!(items[0] in st.rounds[0].answers) && st.blocks[0].items[0].na === false, 'a stored sixth-option answer is not sent once the option is removed');
+// another class's questions, and a new class copying them with the session-code settings
+r = await adm('surveyOf', [K], '');
+ok(r.ok && JSON.stringify(r.data.survey) === JSON.stringify(S0), 'surveyOf sends a class\'s questions');
+const K2 = K + 'b';
+ok(/does not match/.test((await adm('createClass', [K2, 'Copy', 'nope'], '')).error), 'copying from an unknown class refused');
+r = await adm('createClass', [K2, 'Copy of the test', K], '');
+const c2 = r.ok && (await adm('get', [], K2)).data;
+ok(c2 && JSON.stringify(c2.state.survey) === JSON.stringify(S0) && c2.state.code === false && c2.state.codeSec === 20 && c2.state.roster.length === 0 && c2.responses.length === 0 && c2.secret !== secret,
+  'a new class copies the questions and the session-code settings, not the roster or answers');
+ok((await adm('log', ['create class', 'all', 5], K2)).data.rows[0].detail === 'Copy of the test; questions and settings copied from Survey test 2 (' + K + ')', 'the copy is logged with its source');
+ok((await adm('deleteClass', [K2], K2)).ok, 'the copy deleted');
 
 // the report: student 1 submitted the start round (levels 1 to 5 in turn), student 2 started it
 r = await adm('report');
 ok(r.ok && r.data.title === 'Survey test 2' && r.data.generated && r.data.rounds[0].submitted === 1 && r.data.rounds[0].started === 1 && r.data.rounds[1].submitted === 0
-  && r.data.items.length === 18 && r.data.competencies.length === 6 && r.data.levels.length === 5 && r.data.pairs.both === 0 && !('version' in r.data) && !('na' in r.data), 'report: counts of the start round');
+  && r.data.items.length === 18 && r.data.competencies.length === 6 && r.data.levels.length === 5 && r.data.pairs.both === 0 && !('version' in r.data) && r.data.hasNa === false && r.data.unit.many === 'Competencies', 'report: counts of the start round');
 ok(r.data.items[0].start.n === 1 && r.data.items[0].start.dist.join() === '1,0,0,0,0' && r.data.items[4].start.dist.join() === '0,0,0,0,1' && r.data.items[1].start.mean === 2
   && r.data.overall.start.n === 1 && Math.abs(r.data.overall.start.mean - 51 / 18) < 1e-9 && r.data.overall.start.dist.join() === '4,4,4,3,3'
   && r.data.students.length === 1 && r.data.students[0].email === m(1) && r.data.students[0].end === null, 'report: item statistics and the student\'s scores');
@@ -213,7 +237,7 @@ ok(r.ok && r.data.state.title === 'Survey test 2' && r.data.responses.length ===
 ok(!JSON.stringify(r.data).includes(secret), 'export leaves out the secret');
 const lg = (await adm('log', ['', 'all', 5000])).data.rows;
 const acts = lg.map(x => x.action);
-['create class', 'import roster', 'open', 'close', 'set closing time', 'save settings', 'delete answers', 'remove student', 'add student', 'start', 'submit', 'submit changes', 'refused: save', 'refused: submit', 'refused: unlock', 'refused: closeRound', 'delete all answers', 'refused: deleteRoundAnswers']
+['create class', 'import roster', 'open', 'close', 'set closing time', 'save settings', 'save questions', 'refused: saveSurvey', 'delete answers', 'remove student', 'add student', 'start', 'submit', 'submit changes', 'refused: save', 'refused: submit', 'refused: unlock', 'refused: closeRound', 'delete all answers', 'refused: deleteRoundAnswers']
   .forEach(a => ok(acts.indexOf(a) !== -1, 'logged: ' + a));
 ok(acts.indexOf('export') === -1 && acts.indexOf('get') === -1 && acts.indexOf('state') === -1, 'reads are not logged');
 ok(lg.filter(x => x.action === 'start').length === 3, 'a draft start is logged once per student and round');
@@ -227,11 +251,11 @@ ok(r.ok && r.state.rounds[1].submitted && Object.keys(r.state.rounds[1].answers)
 r = await adm('report');
 ok(r.ok && r.data.rounds[1].submitted === 1 && r.data.items[0].end.dist.join() === '1,0,0,0,0' && r.data.overall.end.n === 1
   && Math.abs(r.data.overall.end.mean - 51 / 18) < 1e-9 && r.data.overall.end.dist.join() === '4,4,4,3,3', 'report of the end round');
-r = await adm('saveSettings', [{ off: ['career2'] }]);
-ok(r.ok && r.data.state.off.join() === 'career2' && (await stu(2, 'state')).state.competencies.length === 5 && (await adm('report')).data.items.length === 15, 'a competency turned off while open leaves the student page and the report');
+r = await adm('saveSurvey', [Object.assign(clone(S0), { blocks: S0.blocks.filter(b => b.id !== 'career2') })]);
+ok(r.ok && r.data.state.survey.blocks.length === 5 && (await stu(2, 'state')).state.blocks.length === 5 && (await adm('report')).data.items.length === 15, 'a section removed while open leaves the student page and the report');
 r = await adm('closeRound', ['end']);
 r = await adm('get');
-ok(r.data.responses.some(x => x.email === m(2) && x.round === 'end' && x.answers['career2.outreach'] === 3 && x.answers['communication2.summarize'] === 3), 'the answers to the competency turned off are kept in the rows');
+ok(r.data.responses.some(x => x.email === m(2) && x.round === 'end' && x.answers['career2.outreach'] === 3 && x.answers['communication2.summarize'] === 3), 'the answers to the removed section are kept in the rows');
 
 // delete
 r = await adm('deleteInfo');

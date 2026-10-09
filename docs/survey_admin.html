@@ -85,6 +85,21 @@
     .report tr.group td { font-weight: 700; padding-top: 12px; }
     .report tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
     .report td.lab { padding-left: 18px; }
+    /* the Questions tab: a box per section, a row per question (number, statement and its options, answer count) */
+    button.small { padding: 1px 8px; font-size: 13px; }
+    .qsec { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 12px; background: #fbfbfc; }
+    .qsec > .row b { white-space: nowrap; }
+    .qitem { display: flex; gap: 8px; padding: 8px 0; border-top: 1px dashed var(--line); }
+    .qitem:first-of-type { border-top: 0; }
+    .qnum { min-width: 24px; padding-top: 5px; color: var(--muted); font-weight: 600; }
+    .qbody { flex: 1; min-width: 0; }
+    .qbody textarea { width: 100%; resize: vertical; }
+    .qtexts { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+    .qtexts summary { cursor: pointer; }
+    .qgrid { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 6px 10px; align-items: start; margin-top: 8px; }
+    .qgrid > span { padding-top: 5px; }
+    .qgrid textarea, .qgrid input { width: 100%; }
+    @media (max-width: 600px) { .qgrid { grid-template-columns: 1fr; } .qgrid > span { padding-top: 6px; } }
   </style>
 </head>
 <body>
@@ -96,7 +111,7 @@
   var API = (window.SURVEY_API || '').replace(/\/+$/, '');
   var TOKEN_KEY = 'survey_admin_token';  // this tool's own key: other tools' pages share the origin and keep their own tokens
   var TZ = 'America/New_York';
-  var TABS = ['Overview', 'QR code', 'Responses', 'Report', 'Settings', 'Roster', 'Log'];
+  var TABS = ['Overview', 'Questions', 'QR code', 'Responses', 'Report', 'Settings', 'Roster', 'Log'];
   var token = '', me = '', classes = [], cur = '', D = null, tab = 'Overview';
   var flash = null, busy = false, timer = null, openRow = '';
   var rosterSel = {};  // emails ticked on the Roster tab for removal at once
@@ -129,7 +144,7 @@
   }
 
   function setClass(key) {
-    cur = key || ''; D = null; settingsDraft = null; logRows = null; openRow = ''; reportData = null; rosterSel = {};
+    cur = key || ''; D = null; settingsDraft = null; qDraft = null; logRows = null; openRow = ''; reportData = null; rosterSel = {};
     try { sessionStorage.setItem('survey_admin_class', cur); } catch (e) {}
   }
 
@@ -247,9 +262,9 @@
   }
 
   function signOut() {
-    leaveSettings().then(function (go) {
+    leaveEdits().then(function (go) {
       if (!go) return;
-      setToken(''); D = null; settingsDraft = null;
+      setToken(''); D = null; settingsDraft = null; qDraft = null;
       whenGoogleReady(function () { google.accounts.id.disableAutoSelect(); });
       showSignIn();
     });
@@ -280,14 +295,16 @@
   function fullName(r) { return (r.first + ' ' + r.last).trim(); }
   function studentLink() { return location.href.replace(/survey_admin\.html.*$/, '') + 'survey.html?c=' + encodeURIComponent(cur); }
   function button(label, cls, fn) { return el('button', { text: label, class: cls, disabled: busy, on: { click: fn } }); }
-  function comps() { return D.competencies; }
-  function isOn(code) { return D.state.off.indexOf(code) === -1; }
-  /** Whether an item is in the class's survey: its competency turned on. */
-  function inSurvey(i) { return isOn(i.comp); }
+  function survey() { return D.state.survey; }
+  /** What a section is called: {one, many} (the Questions tab's texts; "Competency" by default). */
+  function unit() { return survey().unit; }
+  /** Whether a question is in the class's survey (D.items lists the survey's questions, then the removed ones). */
+  function inSurvey(i) { return !i.retired; }
   function activeItems() { return D.items.filter(inSurvey); }
   function responsesOf(round) { return D.responses.filter(function (x) { return x.round === round; }); }
-  function answeredCount(x) { return activeItems().filter(function (i) { return i.id in x.answers; }).length; }
-  function levelText(v) { return v ? v + ' ' + (D.levels[v - 1] || '') : ''; }
+  /** A level counts as an answer; the sixth option ('na') counts when the question offers it. */
+  function answeredCount(x) { return activeItems().filter(function (i) { return i.id in x.answers && (x.answers[i.id] !== 'na' || i.na); }).length; }
+  function levelText(v) { return v === 'na' ? survey().naLabel : v ? v + ' ' + (survey().levels[v - 1] || '') : ''; }
   /** A value for a datetime-local input: the given time in this computer's time zone. */
   function localInput(ms) { var d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); }
 
@@ -407,7 +424,7 @@
   var settingsDraft = null;
   /** The form's values. */
   function settingsOf(S) {
-    return { title: S.title, off: S.off.slice(), code: !!S.code, codeSec: String(S.codeSec > 0 ? S.codeSec : 30) };
+    return { title: S.title, code: !!S.code, codeSec: String(S.codeSec > 0 ? S.codeSec : 30) };
   }
   function settingsDirty() { return !!(settingsDraft && D && JSON.stringify(settingsDraft) !== JSON.stringify(settingsOf(D.state))); }
   /** Resolves true when it is fine to leave the Settings form (nothing to save, saved, or discarded), false to stay. */
@@ -423,7 +440,28 @@
       }).catch(function (e) { fail(e); return false; });
     });
   }
-  window.addEventListener('beforeunload', function (ev) { if (settingsDirty()) { ev.preventDefault(); ev.returnValue = ''; } });
+  // Unsaved edits on the Questions tab: qDraft, a copy of the class's survey edited in place, kept across redraws.
+  var qDraft = null, qTextsOpen = false, qFocus = null;
+  function copyOf(o) { return JSON.parse(JSON.stringify(o)); }
+  function questionsDirty() { return !!(qDraft && D && JSON.stringify(qDraft) !== JSON.stringify(D.state.survey)); }
+  function saveQuestions() {
+    busy = true; flash = null; render();
+    return call('saveSurvey', [qDraft]).then(function (d) {
+      busy = false; setD(d); qDraft = null; reportData = null; flash = { ok: 'Questions saved.' }; render(); return true;
+    }).catch(function (e) { fail(e); return false; });
+  }
+  /** Resolves true when it is fine to leave the Questions tab (nothing to save, saved, or discarded), false to stay. */
+  function leaveQuestions() {
+    if (!questionsDirty()) { qDraft = null; return Promise.resolve(true); }
+    return choose('Save the questions?', ['You changed the questions but did not save them.'],
+      [{ label: "Don't save", value: 'discard', cls: 'plain' }, { label: 'Save', value: 'save' }]).then(function (v) {
+      if (v === 'discard') { qDraft = null; return true; }
+      if (v !== 'save') return false;
+      return saveQuestions();
+    });
+  }
+  function leaveEdits() { return leaveSettings().then(function (go) { return go ? leaveQuestions() : false; }); }
+  window.addEventListener('beforeunload', function (ev) { if (settingsDirty() || questionsDirty()) { ev.preventDefault(); ev.returnValue = ''; } });
 
   /** Downloads everything stored about the class (settings, roster, answers, log) as one JSON file. */
   function exportAll() {
@@ -558,7 +596,7 @@
       var sel = el('select', { disabled: busy, on: { change: function (ev) {
         var key = ev.target.value;
         flash = null;
-        leaveSettings().then(function (go) { if (!go) { ev.target.value = cur; return; } setClass(key); loadClass(false); });
+        leaveEdits().then(function (go) { if (!go) { ev.target.value = cur; return; } setClass(key); loadClass(false); });
       } } });
       classes.forEach(function (c) { sel.appendChild(el('option', { value: c.key, text: (c.title || c.key) + ' (' + c.key + ')' })); });
       sel.value = cur;
@@ -567,13 +605,22 @@
     var keyIn = el('input', { type: 'text', placeholder: 'new key, e.g. bus101-fall2026', size: 26 });
     var titleIn = el('input', { type: 'text', placeholder: 'title, e.g. BUS 101 Fall 2026', size: 26 });
     chooser.appendChild(el('span', { class: 'muted', text: classes.length ? 'or create:' : 'Create a class:' }));
-    chooser.appendChild(keyIn); chooser.appendChild(titleIn);
+    // A new class starts with the default questions and settings, or a copy of another class's (questions, answer
+    // options, texts, and session-code settings; not its roster, answers, or log).
+    var fromSel = el('select', { title: 'Questions and settings of the new class' }, el('option', { value: '', text: 'with the default questions' }));
+    classes.forEach(function (c) { fromSel.appendChild(el('option', { value: c.key, text: 'copying the questions and settings of ' + (c.title || c.key) })); });
+    chooser.appendChild(keyIn); chooser.appendChild(titleIn); chooser.appendChild(fromSel);
     chooser.appendChild(button('Create', 'plain', function () {
-      busy = true; flash = null;
-      call('createClass', [keyIn.value, titleIn.value], '').then(function (d) {
-        busy = false; classes = d.classes; setClass(d.key); flash = { ok: 'Class created. Import the roster, then open the start-of-semester survey on the Overview tab.' };
-        tab = 'Roster'; loadClass(false);
-      }).catch(fail);
+      var from = fromSel.value, fromTitle = fromSel.options[fromSel.selectedIndex].text.replace(/^copying the questions and settings of /, '');
+      leaveEdits().then(function (go) {
+        if (!go) return;
+        busy = true; flash = null;
+        call('createClass', [keyIn.value, titleIn.value, from], '').then(function (d) {
+          busy = false; classes = d.classes; setClass(d.key);
+          flash = { ok: 'Class created' + (from ? ' with the questions and settings of ' + fromTitle : ' with the default questions') + '. Import the roster, then open the start-of-semester survey on the Overview tab.' };
+          tab = 'Roster'; loadClass(false);
+        }).catch(fail);
+      });
     }));
     app.appendChild(el('div', { class: 'card' }, chooser,
       cur ? el('p', { class: 'muted', style: 'margin:0' }, 'Student link: ', el('code', { text: studentLink() }), ' ',
@@ -588,22 +635,21 @@
     TABS.forEach(function (t) {
       tabs.appendChild(el('button', { class: 'tab' + (t === tab ? ' on' : ''), text: t, on: { click: function () {
         flash = null;
-        leaveSettings().then(function (go) { if (!go) return; tab = t; if (t === 'Report') reportData = null; render(); poll(); if (t === 'Log' && logRows === null) loadLog(); });
+        leaveEdits().then(function (go) { if (!go) return; tab = t; if (t === 'Report') reportData = null; render(); poll(); if (t === 'Log' && logRows === null) loadLog(); });
       } } }));
     });
     app.appendChild(tabs);
     var card = el('div', { class: 'card' });
-    ({ Overview: overview, 'QR code': qrTab, Responses: responses, Report: reportTab, Settings: settings, Roster: roster, Log: logTab })[tab](card);
+    ({ Overview: overview, Questions: questionsTab, 'QR code': qrTab, Responses: responses, Report: reportTab, Settings: settings, Roster: roster, Log: logTab })[tab](card);
     app.appendChild(card);
     window.scrollTo(0, keepScroll);
   }
 
   // ---- Overview: the two rounds, opened and closed by hand, with an optional closing time
   function overview(card) {
-    var S = D.state, n = S.roster.length;
-    var on = comps().filter(function (c) { return isOn(c.code); }), offNames = comps().filter(function (c) { return !isOn(c.code); }).map(function (c) { return c.name; });
-    card.appendChild(el('p', {}, S.roster.length + ' students on the roster. The survey has ' + activeItems().length + ' items in ' + on.length + ' competencies'
-      + (offNames.length ? ' (turned off: ' + offNames.join(', ') + '; see Settings).' : ' (see Settings).')));
+    var S = D.state, n = S.roster.length, nb = survey().blocks.length;
+    card.appendChild(el('p', {}, S.roster.length + ' students on the roster. The survey has ' + activeItems().length + ' questions in ' + nb + ' '
+      + (nb === 1 ? unit().one : unit().many).toLowerCase() + ' (Questions tab).'));
     if (!n) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'The roster is empty: import it on the Roster tab before opening a survey. Only students on the roster can answer.' }));
     S.rounds.forEach(function (r) {
       var open = D.open.indexOf(r.id) !== -1, rows = responsesOf(r.id);
@@ -652,7 +698,147 @@
       }
       card.appendChild(box);
     });
-    card.appendChild(el('p', { class: 'muted', style: 'margin-top:12px', text: 'Students answer each item with one of the ' + D.levels.length + ' levels. Answers are saved as they go; the survey counts as submitted once every item has an answer and the student presses Submit. While the survey is open, a student can change answers and submit again; the first submission time is kept.' }));
+    card.appendChild(el('p', { class: 'muted', style: 'margin-top:12px', text: 'Students answer each question with one of the ' + survey().levels.length + ' levels (or "' + survey().naLabel + '" where the Questions tab offers it). Answers are saved as they go; the survey counts as submitted once every question has an answer and the student presses Submit. While the survey is open, a student can change answers and submit again; the first submission time is kept.' }));
+  }
+
+  // ---- Questions: the class's survey (its sections, their questions, the answer options, the texts), edited as a
+  // draft (qDraft) and saved at once. A question keeps its id when edited, so its answers stay attached; a new question
+  // is sent without an id and the Worker gives it one. Removed questions keep their answers (listed as removed).
+  function questionsTab(card) {
+    var S = D.state;
+    if (!qDraft) qDraft = copyOf(S.survey);
+    var Q = qDraft, anyOpen = D.open.length > 0, U = Q.unit;
+    var note = el('span', { class: 'muted' });
+    var edited = function () { note.textContent = questionsDirty() ? 'Unsaved changes.' : ''; };
+    var counts = {};  // answers stored per question id, over students and rounds
+    D.responses.forEach(function (x) { Object.keys(x.answers).forEach(function (id) { counts[id] = (counts[id] || 0) + 1; }); });
+    /** A text box bound to obj[key] (a textarea when rows is given). */
+    var field = function (obj, key, attrs, rows) {
+      var e = el(rows ? 'textarea' : 'input', Object.assign({ type: rows ? null : 'text', rows: rows || null, value: obj[key] || '' }, attrs || {}));
+      e.addEventListener('input', function () { obj[key] = e.value; edited(); });
+      if (qFocus === obj && key === 'text') { qFocus = null; setTimeout(function () { e.focus(); }, 0); }
+      return e;
+    };
+    var small = function (label, title, fn) { return el('button', { class: 'plain small', text: label, title: title, 'aria-label': title, disabled: busy, on: { click: fn } }); };
+    var move = function (arr, k, d) { var j = k + d; if (j < 0 || j >= arr.length) return; var t = arr[k]; arr[k] = arr[j]; arr[j] = t; render(); };
+    var blank = function () { return { id: '', name: '', text: '', na: false }; };
+
+    var save = function () {
+      if (!questionsDirty()) { flash = { ok: 'Nothing changed.' }; render(); return; }
+      var lines = questionChanges(S.survey, Q);
+      if (anyOpen) lines.push('A survey is open: students see the change the next time their page loads; a student who submitted answers an added question by submitting again.');
+      ask('Save the questions?', lines, 'Save', false).then(function (yes) { if (yes) saveQuestions(); });
+    };
+    var saveRow = function () {
+      return el('div', { class: 'row' }, button('Save', '', save), button('Discard', 'plain', function () { qDraft = null; render(); }), note);
+    };
+
+    card.appendChild(el('p', { class: 'muted', text: 'The questions of this class\'s survey, in ' + U.many.toLowerCase() + '. Students rate each question on the five-option scale. '
+      + 'Tick "sixth option" on a question to add "' + Q.naLabel + '" to it: the answer is stored as NA and left out of the report\'s means and changes. '
+      + 'Changing a question\'s wording keeps the answers given to it; to ask something else, remove the question and add a new one. '
+      + 'A removed question keeps its answers (the Responses tab and the CSV list them as removed). Nothing changes for students until you Save.' }));
+    if (anyOpen) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'A survey is open. Change the questions before opening a survey where possible.' }));
+    card.appendChild(saveRow());
+
+    // load a starting point into the editor: the default questions or another class's
+    var from = el('select', {}, el('option', { value: '', text: 'the default questions' }));
+    classes.forEach(function (c) { if (c.key !== cur) from.appendChild(el('option', { value: c.key, text: 'the questions of ' + (c.title || c.key) })); });
+    card.appendChild(el('div', { class: 'row' }, el('span', { class: 'muted', text: 'Replace the questions in the editor with' }), from,
+      button('Load', 'plain', function () {
+        var key = from.value, label = from.options[from.selectedIndex].text;
+        ask('Load ' + label + '?', ['The editor\'s questions, answer options, and texts are replaced with ' + label + '. Nothing changes for students until you Save; Discard returns to the saved questions.'], 'Load', false).then(function (yes) {
+          if (!yes) return;
+          if (!key) { qDraft = copyOf(D.defaultSurvey); render(); return; }
+          busy = true; render();
+          call('surveyOf', [key]).then(function (d) { busy = false; qDraft = d.survey; render(); }).catch(fail);
+        });
+      }),
+      el('span', { class: 'muted', text: '·' }),
+      button('Sixth option on every question', 'plain', function () { Q.blocks.forEach(function (b) { b.items.forEach(function (i) { i.na = true; }); }); render(); }),
+      button('on none', 'plain', function () { Q.blocks.forEach(function (b) { b.items.forEach(function (i) { i.na = false; }); }); render(); })));
+
+    // the answer options and the texts around the questions
+    var texts = el('details', { class: 'qtexts', open: qTextsOpen, on: { toggle: function () { qTextsOpen = texts.open; } } },
+      el('summary', {}, el('b', { text: 'Answer options and texts' }), el('span', { class: 'muted', text: ' (' + Q.levels.join(', ') + '; sixth option: ' + Q.naLabel + ')' })));
+    var grid = el('div', { class: 'qgrid' });
+    var pair = function (label, input) { grid.appendChild(el('span', { text: label })); grid.appendChild(input); };
+    Q.levels.forEach(function (l, k) { pair('Option ' + (k + 1) + (k === 0 ? ' (lowest)' : k === Q.levels.length - 1 ? ' (highest)' : ''), field(Q.levels, k, { maxlength: 40 })); });
+    pair('Sixth option', field(Q, 'naLabel', { maxlength: 40 }));
+    pair('Heading of the student page', field(Q, 'heading', { maxlength: 150 }));
+    pair('Introduction, start of semester', field(Q.intro, 'start', { maxlength: 1500 }, 3));
+    pair('Introduction, end of semester', field(Q.intro, 'end', { maxlength: 1500 }, 3));
+    pair('Instruction after the introduction', field(Q, 'instruction', { maxlength: 1500 }, 2));
+    pair('After each section\'s name', field(Q, 'prompt', { maxlength: 200, placeholder: 'empty: the name alone' }));
+    pair('A section is called', field(U, 'one', { maxlength: 40 }));
+    pair('Several sections are called', field(U, 'many', { maxlength: 40 }));
+    texts.appendChild(grid);
+    texts.appendChild(el('p', { class: 'muted', style: 'margin:8px 0 0', text: 'The student page shows the heading, the introduction of the survey being answered, the instruction, then each section as "name: ' + (Q.prompt || '...') + '" above its questions. The section word is used on this page and in the report.' }));
+    card.appendChild(texts);
+
+    // the sections and their questions
+    Q.blocks.forEach(function (b, bk) {
+      var sec = el('div', { class: 'qsec' });
+      var n = b.items.reduce(function (t, i) { return t + (counts[i.id] || 0); }, 0);
+      sec.appendChild(el('div', { class: 'row' }, el('b', { text: U.one + ' ' + (bk + 1) }), field(b, 'name', { size: 40, maxlength: 120, placeholder: 'name' }),
+        small('↑', 'Move this ' + U.one.toLowerCase() + ' up', function () { move(Q.blocks, bk, -1); }),
+        small('↓', 'Move this ' + U.one.toLowerCase() + ' down', function () { move(Q.blocks, bk, 1); }),
+        small('Remove', 'Remove this ' + U.one.toLowerCase(), function () {
+          ask('Remove ' + (b.name || U.one.toLowerCase() + ' ' + (bk + 1)) + '?', ['Its ' + b.items.length + ' question' + (b.items.length === 1 ? '' : 's') + ' leave the editor.'
+            + (n ? ' The ' + n + ' answers given to them stay stored after you Save.' : ''), 'Nothing changes for students until you Save.'], 'Remove', true).then(function (yes) {
+            if (yes) { Q.blocks.splice(bk, 1); render(); }
+          });
+        })));
+      b.items.forEach(function (i, ik) {
+        var na = el('input', { type: 'checkbox' }); na.checked = !!i.na;
+        na.addEventListener('change', function () { i.na = na.checked; edited(); });
+        var k = counts[i.id] || 0;
+        sec.appendChild(el('div', { class: 'qitem' }, el('span', { class: 'qnum', text: (ik + 1) + '.' }),
+          el('div', { class: 'qbody' }, field(i, 'text', { maxlength: 400, placeholder: 'the statement students rate' }, 2),
+            el('div', { class: 'row', style: 'margin:4px 0 0' },
+              el('label', {}, 'Short label', field(i, 'name', { size: 30, maxlength: 80, placeholder: 'for the report; empty: the statement' })),
+              el('label', { title: 'Adds "' + Q.naLabel + '" to this question' }, na, 'sixth option'),
+              small('↑', 'Move this question up', function () { move(b.items, ik, -1); }),
+              small('↓', 'Move this question down', function () { move(b.items, ik, 1); }),
+              small('Remove', 'Remove this question', function () { b.items.splice(ik, 1); render(); }),
+              el('span', { class: 'muted', text: !i.id ? 'new' : k ? k + ' answer' + (k === 1 ? '' : 's') + ' stored' : 'no answers yet' })))));
+      });
+      sec.appendChild(el('div', { class: 'row', style: 'margin:6px 0 0' }, button('Add a question', 'plain', function () { var q = blank(); b.items.push(q); qFocus = q; render(); }),
+        b.items.length ? null : el('span', { class: 'muted', text: 'A ' + U.one.toLowerCase() + ' needs at least one question.' })));
+      card.appendChild(sec);
+    });
+    card.appendChild(el('div', { class: 'row', style: 'margin-top:12px' }, button('Add a ' + U.one.toLowerCase(), 'plain', function () {
+      var q = blank(); Q.blocks.push({ id: '', name: '', items: [q] }); qFocus = q; render();
+    })));
+    card.appendChild(saveRow());
+    edited();
+  }
+
+  /** The lines of the save confirmation: what changes from survey a (saved) to b (the editor). */
+  function questionChanges(a, b) {
+    var flat = function (sv) {
+      var out = [];
+      sv.blocks.forEach(function (bl) { bl.items.forEach(function (i) { out.push({ id: i.id, block: bl.name, name: (i.name || i.text).trim(), text: i.text.trim(), na: !!i.na }); }); });
+      return out;
+    };
+    var A = flat(a), B = flat(b);
+    var old = function (id) { return id ? A.filter(function (i) { return i.id === id; })[0] : null; };
+    var inB = function (id) { return B.some(function (i) { return i.id === id; }); };
+    var short = function (s) { return s.length > 50 ? s.slice(0, 49) + '…' : s; };
+    var list = function (L) { return L.length > 8 ? L.slice(0, 8).map(function (i) { return short(i.name); }).join('; ') + '; and ' + (L.length - 8) + ' more' : L.map(function (i) { return short(i.name); }).join('; '); };
+    var lines = [], add = function (L, what) { if (L.length) lines.push(what + ' (' + L.length + '): ' + list(L) + '.'); };
+    var added = B.filter(function (i) { return !old(i.id); }), removed = A.filter(function (i) { return !inB(i.id); });
+    var reworded = B.filter(function (i) { var o = old(i.id); return o && o.text !== i.text; });
+    add(added, 'Added');
+    add(removed, 'Removed; their answers stay stored');
+    add(reworded, 'Reworded; their answers stay attached');
+    add(B.filter(function (i) { var o = old(i.id); return i.na && !(o && o.na); }), 'Sixth option added');
+    add(B.filter(function (i) { var o = old(i.id); return !i.na && o && o.na; }), 'Sixth option removed; NA answers to them no longer count as answers');
+    if (JSON.stringify(a.blocks.map(function (x) { return x.name.trim(); })) !== JSON.stringify(b.blocks.map(function (x) { return x.name.trim(); }))) lines.push('Sections renamed, added, removed, or reordered.');
+    else if (JSON.stringify(A.map(function (i) { return i.id; })) !== JSON.stringify(B.map(function (i) { return i.id; }))) lines.push('Questions reordered.');
+    if (JSON.stringify(a.levels) !== JSON.stringify(b.levels) || a.naLabel !== b.naLabel) lines.push('Answer options: ' + b.levels.join(', ') + '; sixth option: ' + b.naLabel + '.');
+    if (['heading', 'instruction', 'prompt'].some(function (k) { return a[k] !== b[k]; }) || JSON.stringify(a.intro) !== JSON.stringify(b.intro) || JSON.stringify(a.unit) !== JSON.stringify(b.unit)) lines.push('Texts of the student page or the section word changed.');
+    if (!lines.length) lines.push('Short labels changed.');
+    return lines;
   }
 
   // ---- Responses: one row per student, the status of each round, and each student's answers
@@ -665,7 +851,7 @@
       if (!people.some(function (p) { return p.email === x.email; })) people.push({ r: null, email: x.email, gone: true });
     });
     card.appendChild(el('div', { class: 'row' }, button('Download CSV', 'plain', function () { downloadAnswers(people, byKey); }),
-      el('span', { class: 'muted', text: 'One row per student and survey: the status, the times, and the answer to each item (1 to ' + D.levels.length + '; blank when not answered).' })));
+      el('span', { class: 'muted', text: 'One row per student and survey: the status, the times, and the answer to each question (1 to ' + survey().levels.length + ', NA for "' + survey().naLabel + '", blank when not answered).' })));
     if (!people.length) { card.appendChild(el('p', { class: 'muted', text: 'No students on the roster yet.' })); return; }
     var head = el('tr', {}, el('th', { text: 'Student' }), el('th', { text: 'Email' }));
     S.rounds.forEach(function (r) { head.appendChild(el('th', { text: r.name })); });
@@ -691,7 +877,7 @@
   /** One student's answers, an item per row, a column per round, with a "Delete answers" button per round. */
   function answersTable(p, byKey) {
     var S = D.state, name = p.r ? fullName(p.r) : p.email;
-    var head = el('tr', {}, el('th', { text: 'Competency' }), el('th', { text: 'Item' }));
+    var head = el('tr', {}, el('th', { text: unit().one }), el('th', { text: 'Question' }));
     var foot = el('tr', {}, el('td', {}), el('td', {}));
     S.rounds.forEach(function (r) {
       var x = byKey[r.id + '|' + p.email];
@@ -702,11 +888,11 @@
       }) : null));
     });
     var t = el('table', { style: 'width:auto' }, head);
-    // Every item of the class's survey, plus any item with an answer to a competency turned off.
+    // Every question of the class's survey, plus any removed question this student answered.
     D.items.forEach(function (i) {
       var vals = S.rounds.map(function (r) { var x = byKey[r.id + '|' + p.email]; return x ? x.answers[i.id] : undefined; });
       if (!inSurvey(i) && vals.every(function (v) { return v === undefined; })) return;
-      var tr = el('tr', {}, el('td', { text: i.compName + (inSurvey(i) ? '' : ' (off)') }), el('td', { text: i.dimName }));
+      var tr = el('tr', {}, el('td', { text: i.blockName }), el('td', { text: i.name + (inSurvey(i) ? '' : ' (removed)'), title: i.text, style: 'white-space:normal; max-width:520px' }));
       vals.forEach(function (v) { tr.appendChild(el('td', { text: levelText(v) })); });
       t.appendChild(tr);
     });
@@ -716,10 +902,10 @@
 
   function downloadAnswers(people, byKey) {
     var S = D.state;
-    // Every item of the class's survey, plus any item with an answer anywhere (a competency turned off), in survey order.
+    // Every question of the class's survey, in order, then any removed question with an answer anywhere.
     var cols = D.items.filter(function (i) { return inSurvey(i) || D.responses.some(function (x) { return i.id in x.answers; }); });
     var head = ['Last name', 'First name', 'Email', 'On roster', 'Survey', 'Status', 'Submitted', 'Last change']
-      .concat(cols.map(function (i) { return i.compName + ': ' + i.dimName; }));
+      .concat(cols.map(function (i) { return i.blockName + ': ' + i.name + (inSurvey(i) ? '' : ' (removed)'); }));
     var rows = [head];
     people.forEach(function (p) {
       S.rounds.forEach(function (r) {
@@ -727,7 +913,7 @@
         if (!x && p.gone) return;
         rows.push([p.r ? p.r.last : '', p.r ? p.r.first : '', p.email, p.gone ? 'no' : 'yes', r.name,
           !x ? 'not started' : x.submitted ? 'submitted' : 'started', x && x.submitted ? isoFull(x.submitted) : '', x ? isoFull(x.saved) : '']
-          .concat(cols.map(function (i) { var v = x ? x.answers[i.id] : undefined; return v === undefined ? '' : v; })));
+          .concat(cols.map(function (i) { var v = x ? x.answers[i.id] : undefined; return v === undefined ? '' : v === 'na' ? 'NA' : v; })));
       });
     });
     download('survey_' + cur + '_' + today() + '.csv', rows);
@@ -775,7 +961,7 @@
     bar.appendChild(el('label', {}, namesCb, 'students by name'));
     card.appendChild(bar);
     card.appendChild(el('p', { class: 'muted', text: 'The report of one survey counts every submitted survey of students on the roster; "Start vs end" compares the students who submitted both. '
-      + 'The PDF and Word files have this report\'s text, figures, and tables; Excel has the tables, plus every student\'s competency scores. '
+      + 'The PDF and Word files have this report\'s text, figures, and tables; Excel has the tables, plus every student\'s ' + R.unit.one.toLowerCase() + ' scores. '
       + 'The students table (names and scores) is left out of all three when "students by name" is unchecked.' }));
     reportModelNow = reportModel(R, reportView, reportNames);
     card.appendChild(renderModel(reportModelNow));
@@ -811,7 +997,12 @@
   var LEVEL_PALETTES = { 5: ['#d3e2f4', '#a9c6ea', '#78a6dc', '#4d88d0', '#0b5cad'] };
   function levelColors(L) { return LEVEL_PALETTES[L] || LEVEL_PALETTES[5]; }
   var START_COLOR = '#9fbfe6', END_COLOR = '#0b5cad';
-  var UP_COLOR = '#2e9e4f', SAME_COLOR = '#d5d9de', DOWN_COLOR = '#c9372c', INK = '#1f2328', MUTED = '#5c6670';
+  var UP_COLOR = '#2e9e4f', SAME_COLOR = '#d5d9de', DOWN_COLOR = '#c9372c', INK = '#1f2328', MUTED = '#5c6670', NA_COLOR = '#b4bac2';
+  /** An Excel sheet name from the word for the sections: at most 31 characters, none of \ / ? * [ ] :, and not a name the report uses. */
+  function sheetName(s) {
+    var n = String(s || '').replace(/[\\\/?*\[\]:]/g, ' ').trim().slice(0, 31);
+    return !n || ['summary', 'items', 'students', 'student scores'].indexOf(n.toLowerCase()) !== -1 ? 'Sections' : n;
+  }
   function darkFill(hex) { var n = parseInt(hex.slice(1), 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) < 150; }
   var rect = function (x, y, w, h, fill, rx) { return { k: 'rect', x: x, y: y, w: w, h: h, fill: fill, rx: rx || 0 }; };
   var circle = function (cx, cy, r, fill, stroke) { return { k: 'circle', cx: cx, cy: cy, r: r, fill: fill, stroke: stroke || '' }; };
@@ -937,12 +1128,13 @@
     var when = function (r) { return r.openedAt ? r.name + ' survey: opened ' + dateOf(r.openedAt) + (r.closedAt ? ', closed ' + dateOf(r.closedAt) : ', open') + '.' : r.name + ' survey: not opened yet.'; };
     var blocks = [{ t: 'head', title: R.title, sub: sub, meta: 'Report generated ' + isoFull(R.generated) + '. ' + when(a) + ' ' + when(b) }];
     blocks = blocks.concat(view === 'both' ? bothBlocks(R, names) : roundBlocks(R, view, names));
-    var outside = R.rounds.filter(function (r) { return r.outside; });
+    var outside = R.rounds.filter(function (r) { return r.outside; }), one = R.unit.one.toLowerCase();
     blocks.push({ t: 'h2', text: 'Notes' });
     blocks.push({ t: 'p', muted: true, text: 'Levels: ' + R.levels.map(function (l, k) { return (k + 1) + ' ' + l; }).join(', ') + '. '
-      + 'A student\'s competency score is the mean of the student\'s answers to the competency\'s items, and the student\'s overall score the mean of all the student\'s answers; '
-      + 'competency and overall means average the students\' scores, item means average the answers. '
-      + '"Start vs end" uses the students who submitted both surveys (for an item, those who answered it in both); p is the two-sided p-value of a paired t-test of the mean change, blank with fewer than two students or no variation. '
+      + 'A student\'s ' + one + ' score is the mean of the student\'s answers to the ' + one + '\'s items, and the student\'s overall score the mean of all the student\'s answers; '
+      + one + ' and overall means average the students\' scores, item means average the answers. '
+      + (R.hasNa ? '"' + R.naLabel + '" answers are counted in their own column and left out of every mean, share, score, and change. ' : '')
+      + '"Start vs end" uses the students who submitted both surveys (for an item, those who answered it on the scale in both); p is the two-sided p-value of a paired t-test of the mean change, blank with fewer than two students or no variation. '
       + 'Only submitted surveys of students on the roster count'
       + (outside.length ? '; submitted surveys of students no longer on the roster are left out (' + outside.map(function (r) { return r.name.toLowerCase() + ' ' + r.outside; }).join(', ') + ')' : '') + '.' });
     if (names) blocks.push(scoresSheet(R));
@@ -960,19 +1152,23 @@
       { v: f2(o.mean), l: 'mean level (1 to ' + L + ')' },
       { v: pct(o.applying), l: 'answers at ' + top }];
     var blocks = [{ t: 'facts', items: facts }];
-    blocks.push({ t: 'h2', text: 'Competencies' });
-    blocks.push({ t: 'figure', chart:barChart([{ label: 'All competencies', value: o.mean, bold: true }].concat(comps.map(function (c) { return { label: c.name, value: c[id].mean }; })), END_COLOR, L),
-      caption: 'Mean level by competency, from 1 (' + R.levels[0] + ') to ' + L + ' (' + R.levels[L - 1] + '), over the ' + r.submitted + ' students who submitted.' });
-    blocks.push({ t: 'table', sheet: 'Competencies', head: ['Competency', 'Mean', 'SD', 'Students', 'At ' + top], num: [1, 2, 3, 4], group: -1, total: true,
-      rows: comps.map(function (c) { return [c.name, c[id].mean, c[id].sd, int(c[id].n), pc(c[id].applying)]; })
-        .concat([['All competencies', o.mean, o.sd, int(o.n), pc(o.applying)]]) });
+    var U = R.unit, all = 'All ' + U.many.toLowerCase(), na = R.hasNa;
+    blocks.push({ t: 'h2', text: U.many });
+    blocks.push({ t: 'figure', chart:barChart([{ label: all, value: o.mean, bold: true }].concat(comps.map(function (c) { return { label: c.name, value: c[id].mean }; })), END_COLOR, L),
+      caption: 'Mean level by ' + U.one.toLowerCase() + ', from 1 (' + R.levels[0] + ') to ' + L + ' (' + R.levels[L - 1] + '), over the ' + r.submitted + ' students who submitted.' });
+    var compHead = [U.one, 'Mean', 'SD', 'Students', 'At ' + top].concat(na ? [R.naLabel] : []);
+    blocks.push({ t: 'table', sheet: sheetName(U.many), head: compHead, num: compHead.map(function (h, k) { return k; }).slice(1), group: -1, total: true,
+      rows: comps.map(function (c) { return [c.name, c[id].mean, c[id].sd, int(c[id].n), pc(c[id].applying)].concat(na ? [int(c[id].na)] : []); })
+        .concat([[all, o.mean, o.sd, int(o.n), pc(o.applying)].concat(na ? [int(o.na)] : [])]) });
     blocks.push({ t: 'h2', text: 'Items' });
-    blocks.push({ t: 'figure', chart:stackChart(itemRows(items, function (i) { return { label: i.name, parts: i[id].dist }; }), levelColors(L), levelNames),
-      caption: 'Share of the answers at each level, by item (n = answers).' });
+    // the sixth option, when the survey has it, is a gray part at the right end of each bar
+    blocks.push({ t: 'figure', chart:stackChart(itemRows(items, function (i) { return { label: i.name, parts: i[id].dist.concat(na ? [i[id].na] : []) }; }),
+        levelColors(L).concat(na ? [NA_COLOR] : []), levelNames.concat(na ? [R.naLabel] : [])),
+      caption: 'Share of the answers at each level, by item (n = answers' + (na ? ', including "' + R.naLabel + '"' : '') + ').' });
     var levelCols = R.levels.map(function (l, k) { return 'Level ' + (k + 1); });
-    var itemHead = ['Competency', 'Item', 'Mean', 'SD', 'Answers'].concat(levelCols);
+    var itemHead = [U.one, 'Item', 'Mean', 'SD', 'Answers'].concat(levelCols).concat(na ? [R.naLabel] : []);
     blocks.push({ t: 'table', sheet: 'Items', head: itemHead, num: itemHead.map(function (h, k) { return k; }).slice(2), group: 0,
-      rows: items.map(function (i) { return [i.compName, i.name, i[id].mean, i[id].sd, int(i[id].n)].concat(i[id].dist.map(int)); }) });
+      rows: items.map(function (i) { return [i.compName, i.name, i[id].mean, i[id].sd, int(i[id].n)].concat(i[id].dist.map(int)).concat(na ? [int(i[id].na)] : []); }) });
     if (names) {
       blocks.push({ t: 'h2', text: 'Students' });
       blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', 'Mean level', 'Submitted'], num: [2], group: -1,
@@ -991,17 +1187,18 @@
       { v: f2(o.before) + ' → ' + f2(o.after), l: 'mean level, start → end' },
       { v: signed(o.mean), l: 'mean change' + (o.p !== null ? ' (p ' + (o.p < 0.001 ? '< 0.001' : '= ' + pText(o.p)) + ')' : '') },
       { v: pct(o.up / o.n), l: 'students whose mean level rose' }] }];
-    blocks.push({ t: 'h2', text: 'Competencies' });
-    blocks.push({ t: 'figure', chart:dumbbellChart([{ label: 'All competencies', a: o.before, b: o.after, bold: true }].concat(comps.map(function (c) { return { label: c.name, a: c.change.before, b: c.change.after }; })), [a.name, b.name], L),
-      caption: 'Mean level at the start and at the end of the semester, by competency, for the ' + P.both + ' students who submitted both surveys, and the mean change.' });
-    blocks.push({ t: 'table', sheet: 'Competencies', head: ['Competency', a.name, b.name, 'Change', 'SD of change', 'Students', 'p', 'Rose', 'Same', 'Fell'], num: [1, 2, 3, 4, 5, 6, 7, 8, 9], group: -1, total: true,
-      rows: comps.map(function (c) { return changeRow(c.name, c.change); }).concat([changeRow('All competencies', o)]) });
-    blocks.push({ t: 'figure', chart:stackChart([{ label: 'All competencies', parts: [o.up, o.same, o.down], bold: true }].concat(comps.map(function (c) { return { label: c.name, parts: [c.change.up, c.change.same, c.change.down] }; })), [UP_COLOR, SAME_COLOR, DOWN_COLOR], ['Rose', 'Same', 'Fell']),
-      caption: 'Share of students whose competency score rose, stayed the same, or fell between the two surveys.' });
+    var U = R.unit, all = 'All ' + U.many.toLowerCase();
+    blocks.push({ t: 'h2', text: U.many });
+    blocks.push({ t: 'figure', chart:dumbbellChart([{ label: all, a: o.before, b: o.after, bold: true }].concat(comps.map(function (c) { return { label: c.name, a: c.change.before, b: c.change.after }; })), [a.name, b.name], L),
+      caption: 'Mean level at the start and at the end of the semester, by ' + U.one.toLowerCase() + ', for the ' + P.both + ' students who submitted both surveys, and the mean change.' });
+    blocks.push({ t: 'table', sheet: sheetName(U.many), head: [U.one, a.name, b.name, 'Change', 'SD of change', 'Students', 'p', 'Rose', 'Same', 'Fell'], num: [1, 2, 3, 4, 5, 6, 7, 8, 9], group: -1, total: true,
+      rows: comps.map(function (c) { return changeRow(c.name, c.change); }).concat([changeRow(all, o)]) });
+    blocks.push({ t: 'figure', chart:stackChart([{ label: all, parts: [o.up, o.same, o.down], bold: true }].concat(comps.map(function (c) { return { label: c.name, parts: [c.change.up, c.change.same, c.change.down] }; })), [UP_COLOR, SAME_COLOR, DOWN_COLOR], ['Rose', 'Same', 'Fell']),
+      caption: 'Share of students whose ' + U.one.toLowerCase() + ' score rose, stayed the same, or fell between the two surveys.' });
     blocks.push({ t: 'h2', text: 'Items' });
     blocks.push({ t: 'figure', chart:dumbbellChart(itemRows(items, function (i) { return { label: i.name, a: i.change.before, b: i.change.after }; }), [a.name, b.name], L),
       caption: 'Mean level at the start and at the end of the semester, by item, for the students who answered the item in both surveys.' });
-    blocks.push({ t: 'table', sheet: 'Items', head: ['Competency', 'Item', a.name, b.name, 'Change', 'SD of change', 'Students', 'p', 'Rose', 'Same', 'Fell'], num: [2, 3, 4, 5, 6, 7, 8, 9, 10], group: 0,
+    blocks.push({ t: 'table', sheet: 'Items', head: [U.one, 'Item', a.name, b.name, 'Change', 'SD of change', 'Students', 'p', 'Rose', 'Same', 'Fell'], num: [2, 3, 4, 5, 6, 7, 8, 9, 10], group: 0,
       rows: items.map(function (i) { return [i.compName].concat(changeRow(i.name, i.change)); }) });
     if (names) {
       blocks.push({ t: 'h2', text: 'Students' });
@@ -1229,24 +1426,19 @@
       borders: { top: edge, bottom: edge, left: edge, right: edge, insideHorizontal: edge, insideVertical: edge } });
   }
 
-  // ---- Settings: title, session code, which competencies the survey includes, full download, delete
+  // ---- Settings: title, session code, full download, delete (the questions are on the Questions tab)
   function settings(card) {
     var S = D.state, v = settingsDraft || settingsOf(S);
     var anyOpen = D.open.length > 0;
     var title = el('input', { type: 'text', value: v.title, size: 40 });
     var note = el('span', { class: 'muted' });
-    var boxes = comps().map(function (c) {
-      var cb = el('input', { type: 'checkbox' }); cb.checked = v.off.indexOf(c.code) === -1;
-      return { c: c, cb: cb };
-    });
     var codeCb = el('input', { type: 'checkbox' }); codeCb.checked = !!v.code;
     var codeSecIn = el('input', { type: 'number', min: 3, max: 300, step: 1, value: v.codeSec, style: 'width:70px' });
-    var form = function () { return { title: title.value, off: boxes.filter(function (b) { return !b.cb.checked; }).map(function (b) { return b.c.code; }), code: codeCb.checked, codeSec: codeSecIn.value }; };
+    var form = function () { return { title: title.value, code: codeCb.checked, codeSec: codeSecIn.value }; };
     var edited = function () { settingsDraft = form(); note.textContent = settingsDirty() ? 'Unsaved changes.' : ''; };
     title.addEventListener('input', edited);
     codeCb.addEventListener('change', edited);
     codeSecIn.addEventListener('input', edited);
-    boxes.forEach(function (b) { b.cb.addEventListener('change', edited); });
 
     card.appendChild(el('h2', { text: 'Class' }));
     card.appendChild(el('div', { class: 'row' }, el('label', {}, 'Title ', title)));
@@ -1254,23 +1446,12 @@
       el('span', { class: 'muted', text: 'The 4-digit code is shown with the QR code (QR code tab) and changes at the interval below, so a student starts the survey in the room. It is typed once per survey; after that the student can finish and change answers anywhere while the survey is open. A code is accepted for one to two intervals after it appears (the current code and the previous one); a wrong code can be retried. A longer interval is easier to type and easier to relay to someone outside the room.' }))));
     card.appendChild(el('div', { class: 'row' }, el('label', {}, 'The session code changes every ', codeSecIn, ' seconds'),
       el('span', { class: 'muted', text: '3 to 300; 30 by default' })));
-    card.appendChild(el('h2', { text: 'Competencies in the survey', style: 'margin-top:16px' }));
-    card.appendChild(el('p', { class: 'muted', text: 'Unchecked competencies are left out of the survey for both rounds. Turning a competency off keeps the answers students gave to it; turning it on adds its items, which students who have submitted then answer by submitting again.' }));
-    if (anyOpen) card.appendChild(el('div', { class: 'banner note', style: 'margin:0 0 10px', text: 'A survey is open: a change applies to students the next time their page loads. Change the competencies before opening a survey where possible.' }));
-    boxes.forEach(function (b) {
-      card.appendChild(el('label', { class: 'comp' }, b.cb, el('span', {}, el('b', { text: b.c.name }), ' (' + b.c.dims.length + ' items)',
-        el('br'), el('span', { class: 'muted', text: b.c.dims.map(function (d) { return d.text; }).join(' · ') }))));
-    });
     card.appendChild(el('div', { class: 'row', style: 'margin-top:10px' }, button('Save', '', function () {
       edited();
       if (!settingsDirty()) { flash = { ok: 'Nothing changed.' }; render(); return; }
       // The confirmation lists what changes.
       var was = settingsOf(S), now = settingsDraft, lines = [];
-      var names = function (codes) { return D.competencies.filter(function (c) { return codes.indexOf(c.code) !== -1; }).map(function (c) { return c.name; }).join(', '); };
       if (now.title.trim() !== was.title) lines.push('Title: ' + now.title.trim() + '.');
-      var turnOn = was.off.filter(function (c) { return now.off.indexOf(c) === -1; }), turnOff = now.off.filter(function (c) { return was.off.indexOf(c) === -1; });
-      if (turnOn.length) lines.push('Turned on: ' + names(turnOn) + '. Students who submitted answer the new items by submitting again.');
-      if (turnOff.length) lines.push('Turned off: ' + names(turnOff) + '. Answers already given to them are kept.');
       if (now.code !== was.code) lines.push(now.code ? 'Students type the session code to start a survey.' : 'Students start a survey without the session code.');
       if (String(now.codeSec).trim() !== was.codeSec) lines.push('The session code changes every ' + String(now.codeSec).trim() + ' seconds.');
       if (anyOpen) lines.push('A survey is open: students see the change the next time their page loads.');

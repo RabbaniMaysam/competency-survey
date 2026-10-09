@@ -14,7 +14,7 @@
 import { canonEmail } from './roster.js';
 import * as sv from './survey.js';
 import { report } from './report.js';
-import { COMPETENCIES, ITEMS, LEVELS } from './items.js';
+import { defaultSurvey } from './items.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -200,10 +200,10 @@ async function studentCall(env, real, action, key, args) {
       if (action === 'save' && prev && prev.submitted) throw new Error('Your answers are submitted. Change them with "Submit changes".');
       if (action === 'submit') {
         const left = sv.missing(s, answers);
-        if (left.length) throw new Error(left.length === 1 ? 'One item has no answer: ' + left[0].dimName + '.'
-          : left.length + ' items have no answer.');
+        if (left.length) throw new Error(left.length === 1 ? 'One question has no answer: ' + left[0].name + '.'
+          : left.length + ' questions have no answer.');
       }
-      // Answers to competencies turned off since they were given are kept.
+      // Answers to questions removed from the survey since they were given are kept.
       const old = prev ? JSON.parse(prev.answers || '{}') : {};
       const keep = {};
       Object.keys(old).forEach(id => { if (!sv.activeItems(s).some(i => i.id === id)) keep[id] = old[id]; });
@@ -229,7 +229,7 @@ async function studentCall(env, real, action, key, args) {
 
 // ---------------------------------------------------------------- instructor page
 
-const READS = { whoami: 1, get: 1, log: 1, export: 1, report: 1 };
+const READS = { whoami: 1, get: 1, log: 1, export: 1, report: 1, surveyOf: 1 };
 
 /** Every instructor action except reads is logged (actor "email (instructor)"); a refused one is logged with its reason. */
 async function adminCall(env, real, action, key, args) {
@@ -249,17 +249,23 @@ async function adminDo(env, real, who, action, key, args) {
   const now = Date.now();
   if (action === 'whoami') return { email: real, classes: await classList(env) };
 
+  // args = [key, title, key of a class whose questions and settings the new class copies, or '' for the default survey]
   if (action === 'createClass') {
     const newKey = String(args[0] || '').trim().toLowerCase();
     const title = String(args[1] || '').trim();
+    const fromKey = String(args[2] || '');
     if (!/^[a-z0-9-]{2,30}$/.test(newKey)) throw new Error('The class key must be 2 to 30 lowercase letters, digits, or hyphens.');
     if (!title) throw new Error('The class needs a title.');
+    const from = fromKey ? await readClass(env, fromKey) : null;
     const res = await env.DB.prepare('INSERT OR IGNORE INTO classes (key, state) VALUES (?, ?)')
-      .bind(newKey, JSON.stringify(sv.newClass(title, now))).run();
+      .bind(newKey, JSON.stringify(sv.newClass(title, now, from))).run();
     if (res.meta.changes !== 1) throw new Error('A class with the key "' + newKey + '" exists.');
-    await logRow(env, newKey, who, 'create class', title);
+    await logRow(env, newKey, who, 'create class', title + (from ? '; questions and settings copied from ' + from.title + ' (' + fromKey + ')' : '; default questions'));
     return { key: newKey, classes: await classList(env) };
   }
+
+  // Another class's questions, for loading them into the Questions tab's editor (nothing is saved).
+  if (action === 'surveyOf') return { survey: (await readClass(env, String(args[0] || ''))).survey };
 
   // What deleting the class would remove; the page shows it before asking for the key.
   if (action === 'deleteInfo') {
@@ -328,13 +334,20 @@ async function adminDo(env, real, who, action, key, args) {
     await writeClass(env, key, s);
     logs.push(['remove students', rows.length + ' students: ' + rows.map(r => sv.fullName(r) + ' (' + r.email + ')').join(', ')]);
   } else if (action === 'saveSettings') {
-    const before = JSON.stringify({ title: s.title, off: s.off, code: s.code, codeSec: s.codeSec });
+    const before = JSON.stringify({ title: s.title, code: s.code, codeSec: s.codeSec });
     sv.ADMIN.saveSettings(s, args[0]);
     await writeClass(env, key, s);
-    const after = JSON.stringify({ title: s.title, off: s.off, code: s.code, codeSec: s.codeSec });
-    const offNames = COMPETENCIES.filter(c => s.off.indexOf(c.code) !== -1).map(c => c.name).join(', ') || 'none';
-    if (after !== before) logs.push(['save settings', 'title: ' + s.title + '; turned off: ' + offNames
+    const after = JSON.stringify({ title: s.title, code: s.code, codeSec: s.codeSec });
+    if (after !== before) logs.push(['save settings', 'title: ' + s.title
       + '; session code: ' + (s.code ? 'required' : 'not required') + ', changes every ' + sv.codeSec(s) + ' seconds']);
+  } else if (action === 'saveSurvey') {
+    const d = sv.ADMIN.saveSurvey(s, args[0]);
+    await writeClass(env, key, s);
+    const list = (what, items) => (items.length ? [what + ': ' + items.map(i => i.blockName + ': ' + i.name).join(', ')] : []);
+    const parts = [].concat(list('added', d.added), list('removed', d.removed), list('reworded', d.reworded), list('short label changed', d.relabeled),
+      list('sixth option added', d.naOn), list('sixth option removed', d.naOff),
+      d.order ? ['sections or order changed'] : [], d.texts ? ['texts changed'] : [], d.scale ? ['scale labels changed'] : []);
+    logs.push(['save questions', sv.activeItems(s).length + ' questions in ' + s.survey.blocks.length + ' sections; ' + (parts.join('; ') || 'no change')]);
   } else if (action === 'openRound') {
     sv.ADMIN.openRound(s, args[0], args[1], now);
     await writeClass(env, key, s);
@@ -369,6 +382,7 @@ async function adminDo(env, real, who, action, key, args) {
     await env.DB.batch(logs.map(l => env.DB.prepare(LOG_SQL).bind(time, key, who, l[0], String(l[1]).slice(0, 2000))));
   }
   // secret and now let the page compute the session code shown with the QR code (sv.sessionCode).
-  return { state: shownState(s), secret: s.secret, responses: await allRows(), competencies: COMPETENCIES, items: ITEMS, levels: LEVELS,
+  // items: the survey's questions, then the retired ones (sv.allItems); defaultSurvey: for the Questions tab's "Load the default questions".
+  return { state: shownState(s), secret: s.secret, responses: await allRows(), items: sv.allItems(s), defaultSurvey: defaultSurvey(),
            open: s.rounds.filter(r => sv.isOpen(r, now)).map(r => r.id), now: new Date(now).toISOString() };
 }

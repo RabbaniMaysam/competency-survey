@@ -1,26 +1,36 @@
 // Checks the survey rules (worker/src/survey.js) and the item list (worker/src/items.js).  node test/test_survey.mjs
 import fs from 'node:fs';
 import * as sv from '../worker/src/survey.js';
-import { COMPETENCIES, ITEMS, LEVELS, TEXTS } from '../worker/src/items.js';
+import { COMPETENCIES, LEVELS, TEXTS, NA_LABEL, UNIT, defaultSurvey } from '../worker/src/items.js';
 
 let pass = 0, fail = 0;
 const ok = (cond, label) => { cond ? pass++ : (fail++, console.log('FAIL:', label)); };
 const throws = (fn, re, label) => { try { fn(); ok(false, label + ' (did not throw)'); } catch (e) { ok(re.test(e.message), label + ' (' + e.message + ')'); } };
 const T0 = Date.parse('2026-09-01T12:00:00Z');
 
-// items: 18 one-sentence statements in 6 blocks, five levels
-ok(COMPETENCIES.length === 6 && ITEMS.length === 18 && COMPETENCIES.every(c => /2$/.test(c.code) && c.dims.length === 3 && c.dims.every(d => d.name && /^[A-Z].*\.$/.test(d.text) && d.text.length < 160)), '6 blocks of 3 one-sentence statements');
-ok(new Set(ITEMS.map(i => i.id)).size === 18 && ITEMS.every(i => /^[a-z]+2\.[a-z]+$/.test(i.id) && i.text), 'item ids are unique');
-ok(LEVELS.length === 5 && LEVELS[0] === 'Not at all' && LEVELS[4] === 'Fully', 'five confidence levels');
-ok(TEXTS.title === 'Career skills self-assessment' && TEXTS.intro.start && TEXTS.intro.end && TEXTS.instruction && TEXTS.prompt, 'the student page texts');
+// the default survey: 18 one-sentence statements in 6 blocks, five levels, no question with the sixth option
+const DEF = defaultSurvey(), DEF_ITEMS = sv.surveyItems(DEF);
+ok(COMPETENCIES.length === 6 && DEF.blocks.length === 6 && DEF_ITEMS.length === 18 && COMPETENCIES.every(c => /2$/.test(c.code) && c.dims.length === 3 && c.dims.every(d => d.name && /^[A-Z].*\.$/.test(d.text) && d.text.length < 160)), '6 blocks of 3 one-sentence statements');
+ok(new Set(DEF_ITEMS.map(i => i.id)).size === 18 && DEF_ITEMS.every(i => /^[a-z]+2\.[a-z]+$/.test(i.id) && i.text && i.na === false), 'item ids are unique; no sixth option by default');
+ok(LEVELS.length === 5 && LEVELS[0] === 'Not at all' && LEVELS[4] === 'Fully' && DEF.levels.join() === LEVELS.join() && DEF.naLabel === NA_LABEL && NA_LABEL === 'No chance to try', 'five confidence levels; the sixth option "No chance to try"');
+ok(TEXTS.title === 'Career skills self-assessment' && TEXTS.intro.start && TEXTS.intro.end && TEXTS.instruction && TEXTS.prompt && DEF.heading === TEXTS.title && DEF.unit.one === UNIT.one, 'the student page texts');
+ok(defaultSurvey() !== DEF && defaultSurvey().blocks[0] !== DEF.blocks[0], 'each call gives a fresh copy');
 
 // a new class
 const s = sv.newClass('  BUS 101  ', T0);
-ok(s.title === 'BUS 101' && s.roster.length === 0 && s.off.length === 0 && !('version' in s) && s.rounds.map(r => r.id).join() === 'start,end' && s.rounds.every(r => !r.open), 'new class: every competency on, two closed rounds');
-ok(sv.activeItems(s).length === 18 && sv.activeCompetencies(s).length === 6, 'new class: 18 items in 6 blocks');
+ok(s.title === 'BUS 101' && s.roster.length === 0 && !('off' in s) && s.retired.length === 0 && !('version' in s) && s.rounds.map(r => r.id).join() === 'start,end' && s.rounds.every(r => !r.open), 'new class: the default survey, two closed rounds');
+ok(sv.activeItems(s).length === 18 && s.survey.blocks.length === 6 && JSON.stringify(s.survey) === JSON.stringify(DEF), 'new class: 18 items in 6 blocks');
+// a class saved before the Questions tab: the default survey without the blocks it had turned off, whose questions are retired
 const old = sv.upgrade({ title: 'x', version: 1, off: ['equity', 'career2'] });
-ok(old.off.join() === 'career2' && !('version' in old) && old.rounds.length === 2 && Array.isArray(old.roster), 'upgrade: drops the stored version and off codes of the removed survey');
-ok(sv.upgrade({ title: 'x' }).off.length === 0, 'upgrade: a class without an off list has every competency on');
+ok(!('off' in old) && !('version' in old) && old.survey.blocks.length === 5 && !old.survey.blocks.some(b => b.id === 'career2') && old.rounds.length === 2 && Array.isArray(old.roster),
+  'upgrade: the default survey without the blocks turned off; off and version dropped');
+ok(old.retired.map(r => r.id).join() === 'career2.strengths,career2.requirements,career2.outreach' && old.retired.every(r => r.blockName === 'Career and self-development' && r.name && r.text),
+  'upgrade: the questions of a block turned off are retired, with their labels');
+ok(sv.allItems(old).length === 18 && sv.allItems(old).slice(15).every(i => i.retired) && sv.activeItems(old).length === 15, 'allItems lists the survey, then the retired questions');
+ok(sv.upgrade({ title: 'x' }).survey.blocks.length === 6 && sv.upgrade({ title: 'x' }).retired.length === 0, 'upgrade: a class without an off list has the full default survey');
+ok(sv.upgrade({ title: 'x', off: COMPETENCIES.map(c => c.code) }).survey.blocks.length === 6, 'upgrade: a class with every block off (not possible before) keeps the full survey');
+const up2 = sv.upgrade(JSON.parse(JSON.stringify(old)));
+ok(JSON.stringify(up2.survey) === JSON.stringify(old.survey) && up2.retired.length === 3, 'upgrade is idempotent');
 
 // roster
 sv.ADMIN.importRoster(s, 'first,last,email\nAmy,Zed,AZ@mail.montclair.edu\nBo,Abe,bo@montclair.edu');
@@ -81,15 +91,16 @@ ok(sv.cleanAnswers(s, { 'career2.strengths': '3', 'nope.x': 1, 'career.strengths
   && Object.keys(sv.cleanAnswers(s, { 'nope.x': 1, 'career.strengths': 2, 'thinking2.parts': '' })).length === 0, 'answers cleaned: numbers kept; unknown items and items of the removed survey dropped');
 throws(() => sv.cleanAnswers(s, { 'career2.strengths': 6 }), /not valid/, 'level 6 refused');
 throws(() => sv.cleanAnswers(s, { 'career2.strengths': 0 }), /not valid/, 'level 0 refused');
-throws(() => sv.cleanAnswers(s, { 'career2.strengths': 'na' }), /not valid/, 'N/A refused');
+ok(Object.keys(sv.cleanAnswers(s, { 'career2.strengths': 'na' })).length === 0, 'the sixth option to a question without it is dropped');
+throws(() => sv.cleanAnswers(s, { 'career2.strengths': 'n/a' }), /not valid/, 'other text refused');
 throws(() => sv.cleanAnswers(s, { 'career2.strengths': 2.5 }), /not valid/, 'a fraction refused');
 ok(Object.keys(sv.cleanAnswers(s, null)).length === 0 && Object.keys(sv.cleanAnswers(s, [1, 2])).length === 0, 'no answers from junk');
 ok(sv.missing(s, { 'career2.strengths': 1 }).length === 17, 'missing items listed');
 
 // student view: heading, intro per round, instruction, prompt, five levels, statements
 const v = sv.studentView(s, 'bo@montclair.edu', [{ round: 'start', answers: { 'career2.strengths': 2 }, saved: 'x', submitted: '' }], T0);
-ok(v.authorized && v.name === 'Bo Abe' && v.competencies.length === 6 && v.competencies.every(c => c.dims.every(d => d.text)), 'student view lists the competencies turned on, with their statements');
-ok(v.heading === 'Career skills self-assessment' && v.levels.length === 5 && v.instruction && v.prompt === 'Rate your confidence in doing the following'
+ok(v.authorized && v.name === 'Bo Abe' && v.blocks.length === 6 && v.blocks.every(c => c.items.length === 3 && c.items.every(d => d.id && d.text && d.na === false)), 'student view lists the blocks, with their statements');
+ok(v.heading === 'Career skills self-assessment' && v.levels.length === 5 && v.naLabel === 'No chance to try' && v.instruction && v.prompt === 'Rate your confidence in doing the following'
   && v.rounds[0].intro && v.rounds[1].intro && v.rounds[0].intro !== v.rounds[1].intro && !('version' in v) && !('na' in v), 'student view: heading, scale, and texts');
 ok(v.rounds[0].open && v.rounds[0].answers['career2.strengths'] === 2 && !v.rounds[1].open && v.rounds[1].saved === '', 'student view: round status and own answers');
 ok(sv.studentView(s, 'stranger@x.edu', [], T0).authorized === false && !('rounds' in sv.studentView(s, 'stranger@x.edu', [], T0)), 'a stranger sees nothing');
@@ -130,18 +141,71 @@ ok(g.codeSec === 12, 'saving without the interval keeps it');
 ['2', '301', '6.5', 'x'].forEach(bad => throws(() => sv.ADMIN.saveSettings(g, { codeSec: bad }), /whole number of seconds from 3 to 300/, 'interval "' + bad + '" refused'));
 ok(g.codeSec === 12, 'a refused interval changes nothing');
 
-// settings: competencies turned off and on, at least one stays on
-sv.ADMIN.saveSettings(s, { off: ['career2', 'teamwork2'] });
-ok(s.off.join() === 'teamwork2,career2' && sv.activeItems(s).length === 12 && sv.studentView(s, 'bo@montclair.edu', [], T0).competencies.length === 4, 'off list stored in survey order; 12 items left');
-sv.ADMIN.saveSettings(s, { off: [] });
-ok(sv.activeItems(s).length === 18, 'every competency turned on again');
-sv.ADMIN.saveSettings(s, { off: ['teamwork2'] });
-throws(() => sv.ADMIN.saveSettings(s, { off: ['bogus'] }), /Unknown competency/, 'unknown competency refused');
-throws(() => sv.ADMIN.saveSettings(s, { off: ['career'] }), /Unknown competency/, 'a competency of the removed survey refused');
-throws(() => sv.ADMIN.saveSettings(s, { off: COMPETENCIES.map(c => c.code) }), /at least one/i, 'turning all off refused');
+// settings: the title; an off list sent by an old page is ignored
 throws(() => sv.ADMIN.saveSettings(s, { title: ' ' }), /title/, 'empty title refused');
-sv.ADMIN.saveSettings(s, { title: 'New title', version: '1' });
-ok(s.title === 'New title' && s.off.join() === 'teamwork2' && s.code === true && !('version' in s), 'title alone changes only the title; a version sent by an old page is ignored');
+sv.ADMIN.saveSettings(s, { title: 'New title', version: '1', off: ['teamwork2'] });
+ok(s.title === 'New title' && !('off' in s) && sv.activeItems(s).length === 18 && s.code === true && !('version' in s), 'title alone changes only the title; a version or off list sent by an old page is ignored');
+
+// the questions: edit, add, remove, reorder, and the sixth option
+{
+  const q = sv.newClass('Questions', T0);
+  const ed = JSON.parse(JSON.stringify(q.survey));
+  ed.blocks[0].items[0].text = 'Presenting to a group without notes.';            // reworded: keeps its id
+  ed.blocks[0].items[1].na = true;                                                 // the sixth option
+  ed.blocks[0].items.push({ id: '', name: '', text: 'Listening without interrupting.', na: true });  // added
+  ed.blocks[1].items.splice(2, 1);                                                 // teamwork2.plan removed
+  ed.blocks.splice(5, 1);                                                          // the career block removed
+  ed.blocks.push({ id: '', name: '  Ethics  ', items: [{ text: 'Citing every source you use.' }] });  // a new block, minimal fields
+  [ed.blocks[2], ed.blocks[3]] = [ed.blocks[3], ed.blocks[2]];                    // two blocks swapped
+  ed.unit = { one: 'Skill', many: 'Skills' };
+  const d = sv.ADMIN.saveSurvey(q, ed);
+  const items = sv.activeItems(q), ids = items.map(i => i.id);
+  ok(items.length === 18 - 1 - 3 + 1 + 1 && q.survey.blocks.length === 6 && q.survey.blocks[5].name === 'Ethics' && /^s/.test(q.survey.blocks[5].id), 'saved: 17 questions in 6 blocks; the new block named and given an id');
+  ok(ids[0] === 'communication2.present' && items[0].text === 'Presenting to a group without notes.' && items[1].na === true && /^q[a-z0-9]{6}$/.test(ids[3]) && items[3].na === true,
+    'a reworded question keeps its id; the sixth option stored; a new question receives an id');
+  ok(q.survey.blocks[2].id === 'technology2' && q.survey.blocks[3].id === 'thinking2' && q.survey.unit.many === 'Skills', 'block order and the section word saved');
+  ok(q.retired.map(r => r.id).join() === 'teamwork2.plan,career2.strengths,career2.requirements,career2.outreach' && q.retired[0].blockName === 'Teamwork and leadership', 'removed questions retired with their labels');
+  ok(d.added.length === 2 && d.removed.length === 4 && d.reworded.length === 1 && d.reworded[0].id === 'communication2.present' && d.naOn.length === 2 && d.naOff.length === 0 && d.order && d.texts && !d.scale,
+    'the change summary: added, removed, reworded, sixth option, order, texts');
+  // answers: 'na' to a question with the sixth option counts; a retired question's answers are not the survey's
+  const ans = {}; items.forEach(i => { ans[i.id] = 3; }); ans[ids[1]] = 'na';
+  const c = sv.cleanAnswers(q, Object.assign({ 'teamwork2.plan': 4 }, ans));
+  ok(c[ids[1]] === 'na' && !('teamwork2.plan' in c) && sv.missing(q, c).length === 0, 'the sixth option is an answer; answers to a retired question are not sent on');
+  ok(sv.missing(q, Object.assign({}, c, { [ids[0]]: 'na' })).length === 1, 'the sixth option to a question without it is missing');
+  const sv1 = sv.studentView(Object.assign(q, { roster: [{ first: 'A', last: 'B', email: 'a@x.edu' }] }), 'a@x.edu', [{ round: 'start', answers: Object.assign({}, c, { [ids[0]]: 'na', 'teamwork2.plan': 4 }), saved: 'x', submitted: '' }], T0);
+  ok(sv1.rounds[0].answers[ids[1]] === 'na' && !(ids[0] in sv1.rounds[0].answers) && !('teamwork2.plan' in sv1.rounds[0].answers) && sv1.blocks[0].items[1].na === true, 'the student view sends only valid answers, and which questions offer the sixth option');
+  // a retired question returns: it leaves the retired list and keeps its id (its answers attach again)
+  const back = JSON.parse(JSON.stringify(q.survey));
+  back.blocks[1].items.push({ id: 'teamwork2.plan', name: 'Set up a plan', text: 'Setting up a plan.', na: false });
+  const d2 = sv.ADMIN.saveSurvey(q, back);
+  ok(sv.activeItems(q).some(i => i.id === 'teamwork2.plan') && !q.retired.some(r => r.id === 'teamwork2.plan') && q.retired.length === 3 && d2.added.length === 1, 'a retired question sent again returns with its id');
+  // a new question never takes a retired question's id, nor a duplicate one
+  const dup = JSON.parse(JSON.stringify(q.survey));
+  dup.blocks[0].items.push({ id: dup.blocks[0].items[0].id, text: 'A copy with the same id.' });
+  sv.ADMIN.saveSurvey(q, dup);
+  ok(new Set(sv.activeItems(q).map(i => i.id)).size === sv.activeItems(q).length, 'a duplicate id is replaced by a new one');
+  // refusals
+  const bad = (f, re, label) => { const e = JSON.parse(JSON.stringify(q.survey)); f(e); const before = JSON.stringify(q); throws(() => sv.ADMIN.saveSurvey(q, e), re, label); ok(JSON.stringify(q) === before, label + ': nothing changed'); };
+  bad(e => { e.blocks = []; }, /at least one section/, 'no section refused');
+  bad(e => { e.blocks[0].items = []; }, /has no questions/, 'an empty section refused');
+  bad(e => { e.blocks[0].items[0].text = '  '; }, /Question 1 of "Communication" is empty/, 'an empty question refused');
+  bad(e => { e.blocks[0].name = ''; }, /name of section 1 is empty/, 'a section without a name refused');
+  bad(e => { e.levels = e.levels.slice(0, 4); }, /exactly five/, 'four options refused');
+  bad(e => { e.levels[4] = ''; }, /Option 5 of the scale is empty/, 'an empty option refused');
+  bad(e => { e.naLabel = 'fully'; }, /must differ/, 'a sixth option equal to a level refused');
+  bad(e => { e.blocks[0].items[0].text = 'x'.repeat(401); }, /limit is 400/, 'a question over 400 characters refused');
+  bad(e => { e.unit.one = ''; }, /word for one section/, 'an empty section word refused');
+  // the scale's labels change; the levels stay 1 to 5
+  const lv = JSON.parse(JSON.stringify(q.survey)); lv.levels = ['Never', 'Rarely', 'Sometimes', 'Often', 'Always']; lv.naLabel = 'Not applicable';
+  ok(sv.ADMIN.saveSurvey(q, lv).scale && q.survey.levels[4] === 'Always' && sv.studentView(q, 'a@x.edu', [], T0).naLabel === 'Not applicable', 'the option labels change');
+  // a new class copies another class's survey and session-code settings, not its roster or retired list
+  q.code = false; q.codeSec = 45;
+  const cp = sv.newClass('Copy', T0, q);
+  ok(JSON.stringify(cp.survey) === JSON.stringify(q.survey) && cp.survey !== q.survey && cp.code === false && cp.codeSec === 45 && cp.roster.length === 0 && cp.retired.length === 0 && cp.secret !== q.secret && cp.title === 'Copy',
+    'a class created from another copies the questions and settings, with its own roster, secret, and title');
+  cp.survey.blocks[0].name = 'Changed';
+  ok(q.survey.blocks[0].name !== 'Changed', 'the copy is independent');
+}
 throws(() => sv.ADMIN.resetRound(s, 'start', T0), /Close the start of semester survey first/, 'an open round cannot be reset');
 sv.ADMIN.closeRound(s, 'start', T0);
 sv.ADMIN.resetRound(s, 'start', T0 + 1);

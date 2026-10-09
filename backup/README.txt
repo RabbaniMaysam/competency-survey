@@ -23,11 +23,14 @@ Daily dump into Google Drive
   five attempts, 2 minutes apart; last_run.log has the output of every attempt
   of the last run. If all five fail, the run writes BACKUP_FAILED.txt into that
   folder (the next good run deletes it). The scheduled task stops the script
-  after 1 hour.
+  after 1 hour. The script runs the wrangler installed at
+  C:\Users\rabba\tools\wrangler, not npx: on 2026-10-09 npx's cached copy broke
+  (EBUSY, then "Cannot find module 'miniflare'") and every export failed.
 
   After each dump, export_csv.mjs writes readable CSV copies of it into the
   csv\ subfolder of that folder (replacing the previous set): per class the
-  answers (the columns of the Responses tab's "Download CSV") and the log.
+  answers (the columns of the Responses tab's "Download CSV"; NA is the sixth
+  option; questions removed from the survey are marked "(removed)") and the log.
   For an older day, from this repository's folder:
     node --no-warnings backup/export_csv.mjs "<path of that day's .sql file>"
 

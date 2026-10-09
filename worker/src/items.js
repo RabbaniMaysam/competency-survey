@@ -1,15 +1,22 @@
 /**
- * The survey's items: 6 blocks (competencies) of 3 one-sentence statements (18 in all), each rated for
- * confidence on the five LEVELS. A dimension's `name` is the short label used in the report and the
+ * The default survey of a new class: 6 sections (competencies) of 3 one-sentence statements (18 in all), each
+ * rated for confidence on the five LEVELS. Each class keeps its own copy (defaultSurvey), which the instructor
+ * edits on the Questions tab (see survey.js). A dimension's `name` is the short label used in the report and the
  * responses tables; `text` is the statement the student rates.
  *
- * An item's id is competency code + '.' + dimension code (for example 'career2.outreach'); ids are stored
- * with the answers, so they must not change once a class has answers. (The codes end in 2 because an
- * earlier, longer survey used the plain codes; that survey was removed on 2026-10-07.)
+ * A default item's id is competency code + '.' + dimension code (for example 'career2.outreach'); ids are stored
+ * with the answers, so an item keeps its id when edited. (The codes end in 2 because an earlier, longer survey
+ * used the plain codes; that survey was removed on 2026-10-07.)
  */
 
 /** The five-point confidence scale (1 to 5). */
 export const LEVELS = ['Not at all', 'A little', 'Somewhat', 'Mostly', 'Fully'];
+
+/** The optional sixth option of a question (stored as 'na'): the student had no occasion to try the skill. */
+export const NA_LABEL = 'No chance to try';
+
+/** What a section is called on the instructor page and in the report. */
+export const UNIT = { one: 'Competency', many: 'Competencies' };
 
 export const COMPETENCIES = [
   { code: 'communication2', name: 'Communication', dims: [
@@ -38,8 +45,6 @@ export const COMPETENCIES = [
     { code: 'outreach', name: 'Reach out to strangers', text: 'Contacting people you do not know, such as alumni or professionals, to learn about careers.' }] }
 ];
 
-/** Every item in survey order: {id, comp, compName, dim, dimName, text}. */
-export const ITEMS = COMPETENCIES.flatMap(c => c.dims.map(d => ({ id: c.code + '.' + d.code, comp: c.code, compName: c.name, dim: d.code, dimName: d.name, text: d.text })));
 
 /**
  * The student page's texts: title: the heading; intro: the opening text per round; instruction: the sentence
@@ -54,3 +59,14 @@ export const TEXTS = {
   instruction: 'For each statement below, think about class, group projects, a job or internship, a club, or anything else you have done.',
   prompt: 'Rate your confidence in doing the following'
 };
+
+/**
+ * The default survey in the form a class stores it (state.survey; see survey.js): the texts, the five levels, the
+ * sixth option's label, the word for a section, and the sections with their questions (no question has the sixth option).
+ */
+export function defaultSurvey() {
+  return { heading: TEXTS.title, intro: { start: TEXTS.intro.start, end: TEXTS.intro.end }, instruction: TEXTS.instruction, prompt: TEXTS.prompt,
+           levels: LEVELS.slice(), naLabel: NA_LABEL, unit: { one: UNIT.one, many: UNIT.many },
+           blocks: COMPETENCIES.map(c => ({ id: c.code, name: c.name,
+             items: c.dims.map(d => ({ id: c.code + '.' + d.code, name: d.name, text: d.text, na: false })) })) };
+}

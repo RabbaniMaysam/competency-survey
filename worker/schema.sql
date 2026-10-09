@@ -1,10 +1,10 @@
--- One row per class: settings and roster as JSON (see src/survey.js).
+-- One row per class: settings, roster, and the class's survey (its questions) as JSON (see src/survey.js).
 CREATE TABLE IF NOT EXISTS classes (
   key   TEXT PRIMARY KEY,
   state TEXT NOT NULL
 );
 
--- One row per student and round: answers = {itemId: 1..4 or "na"} (item ids in src/items.js),
+-- One row per student and round: answers = {questionId: 1..5, or "na" for the sixth option} (ids in the class's survey),
 -- saved = time of the last change, submitted = time of the first complete submission ('' before it).
 CREATE TABLE IF NOT EXISTS responses (
   class     TEXT NOT NULL,

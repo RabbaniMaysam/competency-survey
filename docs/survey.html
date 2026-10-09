@@ -42,8 +42,12 @@
     .big:hover { border-color: #a9b8c8; transform: translateY(-1px); }
     .big:active { transform: translateY(0); }
     .big.on { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 2px 6px rgba(11, 92, 173, .35); }
+    /* a question with the sixth option ("No chance to try"): six buttons, the sixth gray and dashed, off the scale */
+    .scale .btns.six { grid-template-columns: repeat(6, 1fr); }
+    .big.na { background: #f0f2f5; border-style: dashed; color: var(--muted); font-weight: 500; }
+    .big.na.on { background: #5c6670; border-color: #5c6670; border-style: solid; color: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .25); }
     @media (max-width: 480px) {
-      .scale .btns { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }
+      .scale .btns, .scale .btns.six { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }
       .big { font-size: 14px; padding: 12px 4px; }
     }
     .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -2px 10px rgba(0, 0, 0, .08); }
@@ -86,7 +90,7 @@
   var TZ = 'America/New_York';
   var conf = null, token = '', S = null, flash = '', timer = null;
   var roundId = '';         // the round being answered
-  var draft = {};           // its answers as the student picks them: {itemId: 1..5}
+  var draft = {};           // its answers as the student picks them: {itemId: 1..5, or 'na' (the sixth option)}
   var saving = false, dirty = false, saveTimer = null, savedAt = '', saveError = '', showMissing = false, done = '';
   // The token is kept in localStorage: the Worker's session token (sent after a Google sign-in) lasts months. "Sign out" deletes it.
   try { token = localStorage.getItem(TOKEN_KEY) || ''; } catch (e) {}
@@ -130,10 +134,12 @@
   function cur() { return S && S.rounds.filter(function (r) { return r.id === roundId; })[0]; }
   function items() {
     var out = [];
-    S.competencies.forEach(function (c) { c.dims.forEach(function (d) { out.push({ id: c.code + '.' + d.code, name: d.name }); }); });
+    S.blocks.forEach(function (b) { b.items.forEach(function (i) { out.push(i); }); });
     return out;
   }
-  function answered() { return items().filter(function (i) { return i.id in draft; }).length; }
+  // an answer counts when it is a level, or the sixth option of a question that offers it
+  function has(i) { return i.id in draft && (draft[i.id] !== 'na' || i.na); }
+  function answered() { return items().filter(has).length; }
 
   /** Loads the state. A survey being answered is left as it is; only the round list and status are refreshed. */
   function load() {
@@ -196,7 +202,7 @@
 
   function submit() {
     var r = cur();
-    var missing = items().filter(function (i) { return !(i.id in draft); });
+    var missing = items().filter(function (i) { return !has(i); });
     if (missing.length) {
       showMissing = true;
       missing.forEach(function (i) { var e = document.getElementById('item-' + i.id); if (e) e.classList.add('missing'); });
@@ -377,17 +383,18 @@
       app.appendChild(el('p', { text: S.instruction + ' ' + finish }));
     }
 
-    S.competencies.forEach(function (c, ci) {
+    S.blocks.forEach(function (c, ci) {
       // the heading is the block's name in bold, then the rating instruction in normal weight
-      var head = el('h2', { class: 'ask' }, el('b', { text: c.name }), ': ' + S.prompt);
+      var head = el('h2', { class: 'ask' }, el('b', { text: c.name }), S.prompt ? ': ' + S.prompt : null);
       var card = el('div', { class: 'card ' + (ci % 2 ? 'compB' : 'compA') }, head);
-      c.dims.forEach(function (d) {
-        var id = c.code + '.' + d.code;
-        var box = el('div', { class: 'item' + (showMissing && !(id in draft) ? ' missing' : ''), id: 'item-' + id });
-        // the statement, then five big buttons with the scale words inside
+      c.items.forEach(function (d) {
+        var id = d.id;
+        var box = el('div', { class: 'item' + (showMissing && !has(d) ? ' missing' : ''), id: 'item-' + id });
+        // the statement, then five big buttons with the scale words inside, and the sixth option when the question offers it
         box.appendChild(el('p', { class: 'stmt', text: d.text }));
-        var btns = el('div', { class: 'btns', role: 'group', 'aria-label': c.name + ': ' + S.prompt });
+        var btns = el('div', { class: 'btns' + (d.na ? ' six' : ''), role: 'group', 'aria-label': c.name + (S.prompt ? ': ' + S.prompt : '') });
         S.levels.forEach(function (t, k) { btns.appendChild(bigOption(id, k + 1, t)); });
+        if (d.na) btns.appendChild(bigOption(id, 'na', S.naLabel, 'na'));
         box.appendChild(el('div', { class: 'scale' }, btns));
         card.appendChild(box);
       });
@@ -396,9 +403,9 @@
     renderBar();
   }
 
-  /** One big button with the scale word inside. */
-  function bigOption(id, value, label) {
-    return el('button', { type: 'button', class: 'big' + (String(draft[id]) === String(value) ? ' on' : ''), 'data-v': String(value), text: label,
+  /** One big button with the scale word inside (extra: a further class, 'na' for the sixth option). */
+  function bigOption(id, value, label, extra) {
+    return el('button', { type: 'button', class: 'big' + (extra ? ' ' + extra : '') + (String(draft[id]) === String(value) ? ' on' : ''), 'data-v': String(value), text: label,
                           on: { click: function () { choose(id, value); } } });
   }
 
@@ -450,9 +457,9 @@
     if (showMissing && n < total) state = (total - n) + ' not answered: tap a red circle to find ' + (total - n === 1 ? 'it.' : 'them.');
     // One circle per item, competencies separated by a small gap.
     var dots = el('div', { class: 'dots', role: 'group', 'aria-label': n + ' of ' + total + ' answered' });
-    S.competencies.forEach(function (c) {
-      c.dims.forEach(function (d, k) {
-        var id = c.code + '.' + d.code, done = id in draft;
+    S.blocks.forEach(function (c) {
+      c.items.forEach(function (d, k) {
+        var id = d.id, done = has(d);
         dots.appendChild(el('button', { type: 'button', title: d.name + (done ? '' : ' (not answered)'), 'aria-label': d.name + (done ? ', answered' : ', not answered'),
           class: 'dot' + (k === 0 ? ' first' : '') + (done ? ' on' : showMissing ? ' miss' : ''),
           on: { click: function () { var e = document.getElementById('item-' + id); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } }));

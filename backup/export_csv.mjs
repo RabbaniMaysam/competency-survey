@@ -8,7 +8,6 @@ import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync } from 'nod
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as sv from '../worker/src/survey.js';
-import { ITEMS } from '../worker/src/items.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const store = join(here, '..', '..', 'backups', 'competency-survey');
@@ -39,8 +38,10 @@ for (const row of all('SELECT key, state FROM classes ORDER BY key')) {
     .map(r => Object.assign({}, r, { answers: JSON.parse(r.answers || '{}') }));
   const people = s.roster.map(r => ({ r, email: r.email, gone: false }));
   resp.forEach(x => { if (!people.some(p => p.email === x.email)) people.push({ r: null, email: x.email, gone: true }); });
-  const cols = ITEMS.filter(i => s.off.indexOf(i.comp) === -1 || resp.some(x => i.id in x.answers));
-  const rows = [['Last name', 'First name', 'Email', 'On roster', 'Survey', 'Status', 'Submitted', 'Last change'].concat(cols.map(i => i.compName + ': ' + i.dimName))];
+  // the survey's questions, then removed ones that have an answer ("(removed)" in the header); 'na' is the sixth option
+  const cols = sv.allItems(s).filter(i => !i.retired || resp.some(x => i.id in x.answers));
+  const rows = [['Last name', 'First name', 'Email', 'On roster', 'Survey', 'Status', 'Submitted', 'Last change']
+    .concat(cols.map(i => i.blockName + ': ' + i.name + (i.retired ? ' (removed)' : '')))];
   people.forEach(p => s.rounds.forEach(r => {
     const x = resp.find(y => y.round === r.id && y.email === p.email);
     if (!x && p.gone) return;

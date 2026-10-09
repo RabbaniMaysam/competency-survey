@@ -33,7 +33,7 @@ ok(paired([]).n === 0 && paired([]).before === null, 'no pairs');
 // one dropped from the roster
 const s = sv.newClass('BUS 101', T0);
 sv.ADMIN.importRoster(s, 'first,last,email\nAmy,Zed,az@x.edu\nBo,Abe,bo@x.edu\nCy,Moe,cy@x.edu\nDi,Oak,di@x.edu\nEd,Pim,ed@x.edu');
-sv.ADMIN.saveSettings(s, { off: ['teamwork2'] });
+{ const e = JSON.parse(JSON.stringify(s.survey)); e.blocks = e.blocks.filter(b => b.id !== 'teamwork2'); sv.ADMIN.saveSurvey(s, e); }
 const items = sv.activeItems(s).map(i => i.id);
 const fill = (level, except) => { const o = {}; items.forEach(id => { o[id] = level; }); Object.assign(o, except || {}); return o; };
 const rows = [
@@ -51,7 +51,7 @@ const R = report(s, rows);
 ok(R.rounds.length === 2 && R.rounds[0].submitted === 4 && R.rounds[0].started === 1 && R.rounds[0].outside === 1 && R.rounds[0].roster === 5
   && R.rounds[1].submitted === 3 && R.rounds[1].started === 0, 'rounds: submitted on the roster, started, outside the roster');
 ok(R.pairs.both === 2 && R.pairs.startOnly === 2 && R.pairs.endOnly === 1, 'pairs: 2 students in both, 2 start only, 1 end only');
-ok(R.competencies.length === 5 && R.items.length === 15 && !R.items.some(i => i.comp === 'teamwork2') && R.levels.length === 5 && !('version' in R) && !('na' in R), 'teamwork left out; five levels');
+ok(R.competencies.length === 5 && R.items.length === 15 && !R.items.some(i => i.comp === 'teamwork2') && R.levels.length === 5 && !('version' in R) && R.hasNa === false && R.unit.many === 'Competencies' && R.naLabel === 'No chance to try', 'teamwork left out; five levels; no sixth option');
 
 // career2.strengths: start az 1, bo 2, cy 2, ed 2 -> n 4, mean 7/4; end az 5, bo 4, di 4 -> n 3, mean 13/3
 const cs = R.items.find(i => i.id === 'career2.strengths');
@@ -82,8 +82,25 @@ ok(near(az.start.overall, 1) && near(az.end.overall, 47 / 15) && near(az.change,
 ok(di.start === null && near(di.end.overall, 4) && di.change === null, 'a student with one round has no change');
 
 // a stored value outside the scale is not counted
-const odd = report(s, [{ round: 'start', email: 'az@x.edu', answers: fill(2, { 'career2.strengths': 'na' }), submitted: '2026-09-02T00:00:00Z' }]);
+const odd = report(s, [{ round: 'start', email: 'az@x.edu', answers: fill(2, { 'career2.strengths': 7 }), submitted: '2026-09-02T00:00:00Z' }]);
 ok(odd.items.find(i => i.id === 'career2.strengths').start.n === 0 && near(odd.overall.start.mean, 2) && odd.overall.start.dist.reduce((x, y) => x + y, 0) === 14, 'a value outside the scale is left out');
+
+// the sixth option: counted as na, left out of every mean and of the change
+{
+  const e = JSON.parse(JSON.stringify(s.survey)); e.blocks.find(b => b.id === 'career2').items[0].na = true; sv.ADMIN.saveSurvey(s, e);
+  const N = report(s, [
+    { round: 'start', email: 'az@x.edu', answers: fill(2, { 'career2.strengths': 'na' }), submitted: '2026-09-02T00:00:00Z' },
+    { round: 'start', email: 'bo@x.edu', answers: fill(4), submitted: '2026-09-02T00:00:00Z' },
+    { round: 'end', email: 'az@x.edu', answers: fill(3), submitted: '2026-12-02T00:00:00Z' },
+    { round: 'end', email: 'bo@x.edu', answers: fill(4, { 'career2.strengths': 'na' }), submitted: '2026-12-02T00:00:00Z' }]);
+  const ci = N.items.find(i => i.id === 'career2.strengths'), cc = N.competencies.find(c => c.code === 'career2');
+  ok(N.hasNa && ci.na === true && ci.start.na === 1 && ci.start.n === 1 && near(ci.start.mean, 4) && ci.end.na === 1 && ci.end.n === 1 && ci.change.n === 0, 'item: the sixth option counted apart; no pair without two levels');
+  ok(cc.start.na === 1 && near(cc.start.mean, 3) && cc.start.dist.reduce((x, y) => x + y, 0) === 5 && N.overall.start.na === 1 && N.overall.end.na === 1, 'competency and overall: the sixth option counted, left out of the pooled answers');
+  ok(near(N.students.find(x => x.email === 'az@x.edu').start.comps.career2, 2) && near(N.overall.start.mean, 3), 'a student\'s score is the mean of the levels answered');
+  const off = JSON.parse(JSON.stringify(s.survey)); off.blocks.find(b => b.id === 'career2').items[0].na = false; sv.ADMIN.saveSurvey(s, off);
+  ok(report(s, [{ round: 'start', email: 'az@x.edu', answers: fill(2, { 'career2.strengths': 'na' }), submitted: '2026-09-02T00:00:00Z' }]).hasNa, 'a stored sixth-option answer still shows the column after the option is turned off');
+  ok(report(s, []).hasNa === false, 'no question with the option and no such answer: no column');
+}
 
 // no answers at all
 const empty = report(s, []);
