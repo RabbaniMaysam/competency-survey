@@ -13,7 +13,9 @@
 export const LEVELS = ['Not at all', 'A little', 'Somewhat', 'Mostly', 'Fully'];
 
 /** The optional sixth option of a question (stored as 'na'): the student had no occasion to try the skill. */
-export const NA_LABEL = 'No chance to try';
+export const NA_LABEL = 'Didn\'t have a chance to try';
+/** The label it replaced on 2026-10-09 (a class still storing it is renamed when read; survey.js upgrade). */
+export const NA_LABEL_OLD = 'No chance to try';
 
 /** What a section is called on the instructor page and in the report. */
 export const UNIT = { one: 'Competency', many: 'Competencies' };

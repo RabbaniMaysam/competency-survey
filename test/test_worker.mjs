@@ -98,8 +98,10 @@ ok(/not an instructor/.test((await post('/admin', { token: sess, class: K, actio
 r = await stu(1, 'state');
 const items = r.state.blocks.flatMap(c => c.items.map(d => d.id));
 ok(r.state.name === 'F1 L1' && items.length === 18 && items[0] === 'communication2.present' && r.state.blocks.length === 6 && r.state.rounds.every(x => !x.open) && r.state.levels.length === 5
-  && !('version' in r.state) && r.state.naLabel === 'No chance to try' && r.state.heading === 'Career skills self-assessment' && r.state.prompt && r.state.instruction
-  && r.state.rounds[0].intro && r.state.rounds[1].intro && r.state.blocks.every(c => c.items.every(d => d.text && d.na === false)), 'student sees 18 statements, five levels, intros; both rounds closed');
+  && !('version' in r.state) && r.state.naLabel === 'Didn\'t have a chance to try' && r.state.heading === 'Career skills self-assessment' && r.state.prompt && r.state.instruction
+  && r.state.rounds[0].intro && r.state.rounds[1].intro && r.state.blocks.every(c => c.items.every(d => d.text && d.na === false))
+  && r.state.goalsMax === 3 && r.state.unit.one === 'Competency' && r.state.rounds[0].scores.length === 0 && r.state.rounds[0].goals.length === 0, 'student sees 18 statements, five levels, intros; both rounds closed; no scores or goals yet');
+ok(/closed/.test((await stu(1, 'goals', ['start', ['career2']])).error), 'goals refused while closed');
 ok(/closed/.test((await stu(1, 'save', ['start', { 'career2.strengths': 2 }])).error), 'saving refused while closed');
 
 // open the start round; draft, submit, change
@@ -137,6 +139,17 @@ ok(/submitted/.test((await stu(1, 'save', ['start', all])).error), 'draft saves 
 await new Promise(res => setTimeout(res, 20));
 r = await stu(1, 'submit', ['start', Object.assign({}, all, { [items[1]]: 4 })]);
 ok(r.ok && r.state.rounds[0].submitted === first && r.state.rounds[0].answers[items[1]] === 4, 'changes submitted; the first submission time is kept');
+// the results page: scores per section (communication: 1, 4, 3), and the goals
+ok(r.state.rounds[0].scores.length === 6 && r.state.rounds[0].scores[0].id === 'communication2' && Math.abs(r.state.rounds[0].scores[0].score - 8 / 3) < 1e-9 && r.state.rounds[0].scores[0].n === 3 && r.state.rounds[0].scores[0].na === 0, 'the submitted round carries a score per section');
+ok(/Submit the survey first/.test((await stu(2, 'goals', ['start', ['career2']])).error), 'goals refused for a student who has not submitted');
+ok(/at most 3/.test((await stu(1, 'goals', ['start', ['communication2', 'teamwork2', 'thinking2', 'technology2']])).error), 'four goals refused');
+ok(/not a section/.test((await stu(1, 'goals', ['start', ['nope']])).error), 'an unknown section refused');
+r = await stu(1, 'goals', ['start', ['teamwork2', 'communication2']]);
+ok(r.ok && r.state.rounds[0].goals.join() === 'communication2,teamwork2', 'goals saved, in the survey\'s order');
+ok((await adm('get')).data.responses.find(x => x.email === m(1) && x.round === 'start').goals.join() === 'communication2,teamwork2', 'the goals are in the response rows');
+ok(/^Start of semester: Communication, Teamwork and leadership$/.test((await adm('log', ['choose goals', 'students', 5])).data.rows[0].detail), 'the choice is logged by name');
+r = await adm('report');
+ok(r.data.rounds[0].goals === 1 && r.data.competencies[0].goals.start === 1 && r.data.competencies[2].goals.start === 0 && r.data.students[0].start.goals.join() === 'communication2,teamwork2', 'the report counts the goals');
 ok(/not on the class roster/.test((await stu(9, 'save', ['start', all])).error), 'a stranger cannot save');
 ok(/closed/.test((await stu(2, 'save', ['end', all])).error), 'the end round is closed');
 // the interval between codes: 30 seconds by default, a setting sent to the student page and used by the Worker
@@ -161,6 +174,7 @@ ok(r.ok && r.data.state.survey.blocks.length === 5 && r.data.state.retired.map(x
   && r.data.items.length === 18 && r.data.items.filter(i => i.retired).length === 3 && r.data.state.title === 'Survey test 2', 'teamwork removed: its questions retired, still listed for the answers');
 let st = (await stu(1, 'state')).state;
 ok(st.blocks.length === 5 && st.blocks[0].items[0].na === true && !('teamwork2.share' in st.rounds[0].answers),'student now sees 5 sections and the sixth option on the first question');
+ok(st.rounds[0].goals.join() === 'communication2' && st.rounds[0].scores.length === 5, 'the goal of the removed section is not sent');
 const ql = (await adm('log', ['save questions', 'instructor', 5])).data.rows[0].detail;
 ok(/^15 questions in 5 sections; removed: Teamwork and leadership: /.test(ql) && /sixth option added: Communication: /.test(ql), 'the change is logged by name: ' + ql);
 ok(/has no questions/.test((await adm('saveSurvey', [Object.assign(clone(S0), { blocks: [{ id: '', name: 'Empty', items: [] }] })])).error) && (await adm('get')).data.state.survey.blocks.length === 5, 'an empty section refused; nothing changed');
@@ -174,6 +188,7 @@ ok(r.ok && r.state.rounds[0].answers[items[0]] === 'na', 'the sixth option saved
 ok(/^14 questions have no answer\.$/.test((await stu(2, 'submit', ['start', { [items[0]]: 'na' }])).error), 'the sixth option counts as an answer');
 r = await adm('saveSurvey', [S0]);
 ok(r.ok && r.data.state.survey.blocks.length === 6 && r.data.state.retired.length === 0 && (await stu(1, 'state')).state.blocks.length === 6, 'teamwork back with its ids; nothing retired');
+ok((await stu(1, 'state')).state.rounds[0].goals.join() === 'communication2,teamwork2', 'the goal returns with its section');
 st = (await stu(2, 'state')).state;
 ok(!(items[0] in st.rounds[0].answers) && st.blocks[0].items[0].na === false, 'a stored sixth-option answer is not sent once the option is removed');
 // another class's questions, and a new class copying them with the session-code settings
@@ -205,6 +220,7 @@ ok(/Close the start of semester survey first/.test((await adm('deleteRoundAnswer
 r = await adm('closeRound', ['start']);
 ok(r.ok && r.data.open.length === 0 && r.data.state.rounds[0].closedAt, 'start round closed');
 ok(/closed/.test((await stu(2, 'save', ['start', { 'career2.strengths': 3 }])).error), 'saving refused after closing');
+ok(/closed/.test((await stu(1, 'goals', ['start', ['career2']])).error) && (await stu(1, 'state')).state.rounds[0].goals.join() === 'communication2,teamwork2', 'goals cannot change after closing');
 ok(/not open/.test((await adm('closeRound', ['start'])).error), 'closing twice refused');
 r = await adm('openRound', ['end', new Date(Date.now() + 2000).toISOString()]);
 ok(r.ok && r.data.open.join() === 'end', 'end round opened with a closing time');
@@ -237,7 +253,7 @@ ok(r.ok && r.data.state.title === 'Survey test 2' && r.data.responses.length ===
 ok(!JSON.stringify(r.data).includes(secret), 'export leaves out the secret');
 const lg = (await adm('log', ['', 'all', 5000])).data.rows;
 const acts = lg.map(x => x.action);
-['create class', 'import roster', 'open', 'close', 'set closing time', 'save settings', 'save questions', 'refused: saveSurvey', 'delete answers', 'remove student', 'add student', 'start', 'submit', 'submit changes', 'refused: save', 'refused: submit', 'refused: unlock', 'refused: closeRound', 'delete all answers', 'refused: deleteRoundAnswers']
+['create class', 'import roster', 'open', 'close', 'set closing time', 'save settings', 'save questions', 'refused: saveSurvey', 'delete answers', 'remove student', 'add student', 'start', 'submit', 'submit changes', 'refused: save', 'refused: submit', 'refused: unlock', 'refused: closeRound', 'delete all answers', 'refused: deleteRoundAnswers', 'choose goals', 'refused: goals']
   .forEach(a => ok(acts.indexOf(a) !== -1, 'logged: ' + a));
 ok(acts.indexOf('export') === -1 && acts.indexOf('get') === -1 && acts.indexOf('state') === -1, 'reads are not logged');
 ok(lg.filter(x => x.action === 'start').length === 3, 'a draft start is logged once per student and round');

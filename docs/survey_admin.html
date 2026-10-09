@@ -851,7 +851,7 @@
       if (!people.some(function (p) { return p.email === x.email; })) people.push({ r: null, email: x.email, gone: true });
     });
     card.appendChild(el('div', { class: 'row' }, button('Download CSV', 'plain', function () { downloadAnswers(people, byKey); }),
-      el('span', { class: 'muted', text: 'One row per student and survey: the status, the times, and the answer to each question (1 to ' + survey().levels.length + ', NA for "' + survey().naLabel + '", blank when not answered).' })));
+      el('span', { class: 'muted', text: 'One row per student and survey: the status, the times, the goals the student chose on the results page, and the answer to each question (1 to ' + survey().levels.length + ', NA for "' + survey().naLabel + '", blank when not answered).' })));
     if (!people.length) { card.appendChild(el('p', { class: 'muted', text: 'No students on the roster yet.' })); return; }
     var head = el('tr', {}, el('th', { text: 'Student' }), el('th', { text: 'Email' }));
     S.rounds.forEach(function (r) { head.appendChild(el('th', { text: r.name })); });
@@ -896,15 +896,25 @@
       vals.forEach(function (v) { tr.appendChild(el('td', { text: levelText(v) })); });
       t.appendChild(tr);
     });
+    // the sections the student chose as goals on the results page
+    var gr = el('tr', { class: 'total' }, el('td', { text: 'Goals' }), el('td', { text: 'Chosen to improve (up to 3)' }));
+    S.rounds.forEach(function (r) { var x = byKey[r.id + '|' + p.email]; gr.appendChild(el('td', { text: x ? goalNames(x).join(', ') || (x.submitted ? 'none chosen' : '') : '' })); });
+    t.appendChild(gr);
     t.appendChild(foot);
     return t;
+  }
+
+  /** The names of the sections a response row's goals point at (ids not in the survey any more are left out). */
+  function goalNames(x) {
+    var g = Array.isArray(x.goals) ? x.goals : [];
+    return survey().blocks.filter(function (b) { return g.indexOf(b.id) !== -1; }).map(function (b) { return b.name; });
   }
 
   function downloadAnswers(people, byKey) {
     var S = D.state;
     // Every question of the class's survey, in order, then any removed question with an answer anywhere.
     var cols = D.items.filter(function (i) { return inSurvey(i) || D.responses.some(function (x) { return i.id in x.answers; }); });
-    var head = ['Last name', 'First name', 'Email', 'On roster', 'Survey', 'Status', 'Submitted', 'Last change']
+    var head = ['Last name', 'First name', 'Email', 'On roster', 'Survey', 'Status', 'Submitted', 'Last change', 'Goals']
       .concat(cols.map(function (i) { return i.blockName + ': ' + i.name + (inSurvey(i) ? '' : ' (removed)'); }));
     var rows = [head];
     people.forEach(function (p) {
@@ -912,7 +922,7 @@
         var x = byKey[r.id + '|' + p.email];
         if (!x && p.gone) return;
         rows.push([p.r ? p.r.last : '', p.r ? p.r.first : '', p.email, p.gone ? 'no' : 'yes', r.name,
-          !x ? 'not started' : x.submitted ? 'submitted' : 'started', x && x.submitted ? isoFull(x.submitted) : '', x ? isoFull(x.saved) : '']
+          !x ? 'not started' : x.submitted ? 'submitted' : 'started', x && x.submitted ? isoFull(x.submitted) : '', x ? isoFull(x.saved) : '', x ? goalNames(x).join('; ') : '']
           .concat(cols.map(function (i) { var v = x ? x.answers[i.id] : undefined; return v === undefined ? '' : v === 'na' ? 'NA' : v; })));
       });
     });
@@ -997,7 +1007,7 @@
   var LEVEL_PALETTES = { 5: ['#d3e2f4', '#a9c6ea', '#78a6dc', '#4d88d0', '#0b5cad'] };
   function levelColors(L) { return LEVEL_PALETTES[L] || LEVEL_PALETTES[5]; }
   var START_COLOR = '#9fbfe6', END_COLOR = '#0b5cad';
-  var UP_COLOR = '#2e9e4f', SAME_COLOR = '#d5d9de', DOWN_COLOR = '#c9372c', INK = '#1f2328', MUTED = '#5c6670', NA_COLOR = '#b4bac2';
+  var UP_COLOR = '#2e9e4f', SAME_COLOR = '#d5d9de', DOWN_COLOR = '#c9372c', INK = '#1f2328', MUTED = '#5c6670', NA_COLOR = '#b4bac2', GOAL_COLOR = '#4a3322';
   /** An Excel sheet name from the word for the sections: at most 31 characters, none of \ / ? * [ ] :, and not a name the report uses. */
   function sheetName(s) {
     var n = String(s || '').replace(/[\\\/?*\[\]:]/g, ' ').trim().slice(0, 31);
@@ -1047,6 +1057,18 @@
       if (r.group || r.value === null || r.value === undefined) return;
       f.ops.push(rect(x(1), f.ys[k] - 8, Math.max(0, x(r.value) - x(1)), 16, color, 2));
       f.ops.push(text(x(r.value) + 6, f.ys[k] + 4, r.value.toFixed(2)));
+    });
+    return f;
+  }
+  /** Horizontal bars of counts, from 0 to max (students who chose each competency as a goal). rows: [{label, value}]. */
+  function countChart(rows, color, max) {
+    var hi = Math.max(1, max), step = hi <= 10 ? 1 : hi <= 50 ? 5 : hi <= 100 ? 10 : 25, ticks = [];
+    for (var v = 0; v <= hi; v += step) ticks.push({ v: v, label: String(v) });
+    var f = chartFrame(rows, null), x = axis(f, 0, hi, ticks);
+    rows.forEach(function (r, k) {
+      if (r.group || r.value === null || r.value === undefined) return;
+      f.ops.push(rect(x(0), f.ys[k] - 8, Math.max(0, x(r.value) - x(0)), 16, color, 2));
+      f.ops.push(text(x(r.value) + 6, f.ys[k] + 4, String(r.value)));
     });
     return f;
   }
@@ -1169,12 +1191,27 @@
     var itemHead = [U.one, 'Item', 'Mean', 'SD', 'Answers'].concat(levelCols).concat(na ? [R.naLabel] : []);
     blocks.push({ t: 'table', sheet: 'Items', head: itemHead, num: itemHead.map(function (h, k) { return k; }).slice(2), group: 0,
       rows: items.map(function (i) { return [i.compName, i.name, i[id].mean, i[id].sd, int(i[id].n)].concat(i[id].dist.map(int)).concat(na ? [int(i[id].na)] : []); }) });
+    // the goals: how many students chose each competency on the results page
+    blocks.push({ t: 'h2', text: 'Goals' });
+    if (!r.goals) blocks.push({ t: 'p', muted: true, text: 'No student has chosen goals yet. After submitting, a student sees a score per ' + U.one.toLowerCase() + ' and may choose up to three to improve.' });
+    else {
+      blocks.push({ t: 'p', text: r.goals + ' of the ' + r.submitted + ' students who submitted chose up to three ' + U.many.toLowerCase() + ' to improve.' });
+      blocks.push({ t: 'figure', chart: countChart(comps.map(function (c) { return { label: c.name, value: c.goals[id] }; }), GOAL_COLOR, r.goals),
+        caption: 'Students who chose the ' + U.one.toLowerCase() + ' as a goal, of the ' + r.goals + ' who chose goals.' });
+      blocks.push({ t: 'table', sheet: 'Goals', head: [U.one, 'Mean', 'Chose it', 'Share of those who chose goals'], num: [1, 2, 3], group: -1,
+        rows: comps.map(function (c) { return [c.name, c[id].mean, int(c.goals[id]), pc(c.goals[id] / r.goals)]; }) });
+    }
     if (names) {
       blocks.push({ t: 'h2', text: 'Students' });
-      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', 'Mean level', 'Submitted'], num: [2], group: -1,
-        rows: R.students.filter(function (x) { return x[id]; }).map(function (x) { return [x.last + ', ' + x.first, x.email, x[id].overall, isoClock(x[id].submitted)]; }) });
+      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', 'Mean level', 'Submitted', 'Goals'], num: [2], group: -1,
+        rows: R.students.filter(function (x) { return x[id]; }).map(function (x) { return [x.last + ', ' + x.first, x.email, x[id].overall, isoClock(x[id].submitted), compNames(R, x[id].goals)]; }) });
     }
     return blocks;
+  }
+
+  /** The names of the competencies with these codes, joined. */
+  function compNames(R, codes) {
+    return R.competencies.filter(function (c) { return (codes || []).indexOf(c.code) !== -1; }).map(function (c) { return c.name; }).join(', ');
   }
 
   function bothBlocks(R, names) {
@@ -1195,6 +1232,14 @@
       rows: comps.map(function (c) { return changeRow(c.name, c.change); }).concat([changeRow(all, o)]) });
     blocks.push({ t: 'figure', chart:stackChart([{ label: all, parts: [o.up, o.same, o.down], bold: true }].concat(comps.map(function (c) { return { label: c.name, parts: [c.change.up, c.change.same, c.change.down] }; })), [UP_COLOR, SAME_COLOR, DOWN_COLOR], ['Rose', 'Same', 'Fell']),
       caption: 'Share of students whose ' + U.one.toLowerCase() + ' score rose, stayed the same, or fell between the two surveys.' });
+    // the goals chosen at the start: did the students who chose a competency gain more on it than the others?
+    if (a.goals) {
+      blocks.push({ t: 'h2', text: 'Goals' });
+      blocks.push({ t: 'p', text: 'At the start of the semester, ' + a.goals + ' of the ' + a.submitted + ' students who submitted chose up to three ' + U.many.toLowerCase() + ' to improve. '
+        + 'For each ' + U.one.toLowerCase() + ', the change of the students who chose it, next to the change of those who did not (students who submitted both surveys).' });
+      blocks.push({ t: 'table', sheet: 'Goals', head: [U.one, 'Chose it', 'Their change', 'p', 'Did not', 'Their change', 'p'], num: [1, 2, 3, 4, 5, 6], group: -1,
+        rows: comps.map(function (c) { return [c.name, int(c.goalChange.n), sg(c.goalChange.mean), pv(c.goalChange.p), int(c.otherChange.n), sg(c.otherChange.mean), pv(c.otherChange.p)]; }) });
+    }
     blocks.push({ t: 'h2', text: 'Items' });
     blocks.push({ t: 'figure', chart:dumbbellChart(itemRows(items, function (i) { return { label: i.name, a: i.change.before, b: i.change.after }; }), [a.name, b.name], L),
       caption: 'Mean level at the start and at the end of the semester, by item, for the students who answered the item in both surveys.' });
@@ -1202,8 +1247,8 @@
       rows: items.map(function (i) { return [i.compName].concat(changeRow(i.name, i.change)); }) });
     if (names) {
       blocks.push({ t: 'h2', text: 'Students' });
-      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', a.name, b.name, 'Change'], num: [2, 3, 4], group: -1,
-        rows: R.students.map(function (x) { return [x.last + ', ' + x.first, x.email, x.start ? x.start.overall : null, x.end ? x.end.overall : null, sg(x.change)]; }) });
+      blocks.push({ t: 'table', sheet: 'Students', head: ['Student', 'Email', a.name, b.name, 'Change', 'Goals at the start'], num: [2, 3, 4], group: -1,
+        rows: R.students.map(function (x) { return [x.last + ', ' + x.first, x.email, x.start ? x.start.overall : null, x.end ? x.end.overall : null, sg(x.change), x.start ? compNames(R, x.start.goals) : '']; }) });
     }
     return blocks;
   }
@@ -1214,10 +1259,10 @@
     R.students.forEach(function (x) {
       R.rounds.forEach(function (r) {
         if (!x[r.id]) return;
-        rows.push([x.last, x.first, x.email, r.name, isoFull(x[r.id].submitted), x[r.id].overall].concat(R.competencies.map(function (c) { return x[r.id].comps[c.code]; })));
+        rows.push([x.last, x.first, x.email, r.name, isoFull(x[r.id].submitted), x[r.id].overall].concat(R.competencies.map(function (c) { return x[r.id].comps[c.code]; })).concat([compNames(R, x[r.id].goals)]));
       });
     });
-    return { t: 'table', xlsxOnly: true, sheet: 'Student scores', head: ['Last name', 'First name', 'Email', 'Survey', 'Submitted', 'Mean level'].concat(R.competencies.map(function (c) { return c.name; })),
+    return { t: 'table', xlsxOnly: true, sheet: 'Student scores', head: ['Last name', 'First name', 'Email', 'Survey', 'Submitted', 'Mean level'].concat(R.competencies.map(function (c) { return c.name; })).concat(['Goals']),
              num: [5].concat(R.competencies.map(function (c, k) { return first + k; })), group: -1, rows: rows };
   }
 

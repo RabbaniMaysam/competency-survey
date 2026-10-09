@@ -6,13 +6,15 @@ import { COMPETENCIES, LEVELS, TEXTS, NA_LABEL, UNIT, defaultSurvey } from '../w
 let pass = 0, fail = 0;
 const ok = (cond, label) => { cond ? pass++ : (fail++, console.log('FAIL:', label)); };
 const throws = (fn, re, label) => { try { fn(); ok(false, label + ' (did not throw)'); } catch (e) { ok(re.test(e.message), label + ' (' + e.message + ')'); } };
+const near = (a, b, tol) => Math.abs(a - b) <= (tol || 1e-9);
 const T0 = Date.parse('2026-09-01T12:00:00Z');
 
 // the default survey: 18 one-sentence statements in 6 blocks, five levels, no question with the sixth option
 const DEF = defaultSurvey(), DEF_ITEMS = sv.surveyItems(DEF);
 ok(COMPETENCIES.length === 6 && DEF.blocks.length === 6 && DEF_ITEMS.length === 18 && COMPETENCIES.every(c => /2$/.test(c.code) && c.dims.length === 3 && c.dims.every(d => d.name && /^[A-Z].*\.$/.test(d.text) && d.text.length < 160)), '6 blocks of 3 one-sentence statements');
 ok(new Set(DEF_ITEMS.map(i => i.id)).size === 18 && DEF_ITEMS.every(i => /^[a-z]+2\.[a-z]+$/.test(i.id) && i.text && i.na === false), 'item ids are unique; no sixth option by default');
-ok(LEVELS.length === 5 && LEVELS[0] === 'Not at all' && LEVELS[4] === 'Fully' && DEF.levels.join() === LEVELS.join() && DEF.naLabel === NA_LABEL && NA_LABEL === 'No chance to try', 'five confidence levels; the sixth option "No chance to try"');
+ok(LEVELS.length === 5 && LEVELS[0] === 'Not at all' && LEVELS[4] === 'Fully' && DEF.levels.join() === LEVELS.join() && DEF.naLabel === NA_LABEL && NA_LABEL === 'Didn\'t have a chance to try', 'five confidence levels; the sixth option "Didn\'t have a chance to try"');
+ok(sv.upgrade({ title: 'x', survey: Object.assign(defaultSurvey(), { naLabel: 'No chance to try' }) }).survey.naLabel === NA_LABEL && sv.upgrade({ title: 'x', survey: Object.assign(defaultSurvey(), { naLabel: 'N/A' }) }).survey.naLabel === 'N/A', 'upgrade renames the old default label only');
 ok(TEXTS.title === 'Career skills self-assessment' && TEXTS.intro.start && TEXTS.intro.end && TEXTS.instruction && TEXTS.prompt && DEF.heading === TEXTS.title && DEF.unit.one === UNIT.one, 'the student page texts');
 ok(defaultSurvey() !== DEF && defaultSurvey().blocks[0] !== DEF.blocks[0], 'each call gives a fresh copy');
 
@@ -100,9 +102,31 @@ ok(sv.missing(s, { 'career2.strengths': 1 }).length === 17, 'missing items liste
 // student view: heading, intro per round, instruction, prompt, five levels, statements
 const v = sv.studentView(s, 'bo@montclair.edu', [{ round: 'start', answers: { 'career2.strengths': 2 }, saved: 'x', submitted: '' }], T0);
 ok(v.authorized && v.name === 'Bo Abe' && v.blocks.length === 6 && v.blocks.every(c => c.items.length === 3 && c.items.every(d => d.id && d.text && d.na === false)), 'student view lists the blocks, with their statements');
-ok(v.heading === 'Career skills self-assessment' && v.levels.length === 5 && v.naLabel === 'No chance to try' && v.instruction && v.prompt === 'Rate your confidence in doing the following'
-  && v.rounds[0].intro && v.rounds[1].intro && v.rounds[0].intro !== v.rounds[1].intro && !('version' in v) && !('na' in v), 'student view: heading, scale, and texts');
+ok(v.heading === 'Career skills self-assessment' && v.levels.length === 5 && v.naLabel === 'Didn\'t have a chance to try' && v.instruction && v.prompt === 'Rate your confidence in doing the following'
+  && v.rounds[0].intro && v.rounds[1].intro && v.rounds[0].intro !== v.rounds[1].intro && !('version' in v) && !('na' in v) && v.unit.many === 'Competencies' && v.goalsMax === 3, 'student view: heading, scale, texts, the section word, and the goal limit');
 ok(v.rounds[0].open && v.rounds[0].answers['career2.strengths'] === 2 && !v.rounds[1].open && v.rounds[1].saved === '', 'student view: round status and own answers');
+ok(v.rounds[0].scores.length === 0 && v.rounds[0].goals.length === 0 && v.rounds[1].goals.length === 0, 'student view: no scores before submission, no goals');
+
+// the results page: a score per section (the mean of the answers on the scale), and the goals (up to 3 sections)
+{
+  const e = JSON.parse(JSON.stringify(s.survey)); e.blocks[0].items[0].na = true; sv.ADMIN.saveSurvey(s, e);
+  const a = {}; sv.activeItems(s).forEach((i, k) => { a[i.id] = (k % 5) + 1; });
+  a['communication2.present'] = 'na';
+  const sc = sv.blockScores(s, a);
+  ok(sc.length === 6 && sc[0].id === 'communication2' && sc[0].name === 'Communication' && sc[0].n === 2 && sc[0].na === 1 && near(sc[0].score, (2 + 3) / 2)
+    && sc[1].n === 3 && near(sc[1].score, (4 + 5 + 1) / 3) && sc.every(x => x.na === 0 || x === sc[0]), 'scores: the mean per section, the sixth option counted apart');
+  ok(sv.blockScores(s, { 'communication2.present': 'na', 'communication2.memo': 7, 'career.x': 3 })[0].score === null && sv.blockScores(s, {})[0].n === 0, 'a section without an answer on the scale has no score; junk ignored');
+  ok(sv.cleanGoals(s, ['teamwork2', 'communication2', 'teamwork2']).join() === 'communication2,teamwork2', 'goals: distinct ids in the survey\'s order');
+  ok(sv.cleanGoals(s, []).length === 0 && sv.GOALS_MAX === 3, 'no goals is allowed');
+  throws(() => sv.cleanGoals(s, ['communication2', 'teamwork2', 'thinking2', 'technology2']), /at most 3 competencies/, 'four goals refused');
+  throws(() => sv.cleanGoals(s, ['nope']), /not a section/, 'an unknown section refused');
+  throws(() => sv.cleanGoals(s, 'communication2'), /list/, 'a string refused');
+  const row = { round: 'start', answers: a, saved: 'x', submitted: 'y', goals: ['thinking2', 'communication2', 'gone'] };
+  ok(sv.goalsOf(s, row).join() === 'communication2,thinking2' && sv.goalsOf(s, null).length === 0 && sv.goalsOf(s, { goals: 'x' }).length === 0, 'the goals of a row: the ids in the survey now, in its order');
+  const sv2 = sv.studentView(s, 'bo@montclair.edu', [row], T0);
+  ok(sv2.rounds[0].goals.join() === 'communication2,thinking2' && sv2.rounds[0].scores.length === 6 && near(sv2.rounds[0].scores[0].score, 2.5) && sv2.rounds[0].scores[0].na === 1, 'the student view sends the submitted round\'s scores and goals');
+  const off = JSON.parse(JSON.stringify(s.survey)); off.blocks[0].items[0].na = false; sv.ADMIN.saveSurvey(s, off);
+}
 ok(sv.studentView(s, 'stranger@x.edu', [], T0).authorized === false && !('rounds' in sv.studentView(s, 'stranger@x.edu', [], T0)), 'a stranger sees nothing');
 ok(v.needCode === true && v.rounds[0].started === true && v.rounds[1].started === false, 'student view: session code needed, a round with a stored row is started');
 

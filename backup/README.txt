@@ -30,7 +30,8 @@ Daily dump into Google Drive
   After each dump, export_csv.mjs writes readable CSV copies of it into the
   csv\ subfolder of that folder (replacing the previous set): per class the
   answers (the columns of the Responses tab's "Download CSV"; NA is the sixth
-  option; questions removed from the survey are marked "(removed)") and the log.
+  option; the Goals column lists the sections the student chose to improve;
+  questions removed from the survey are marked "(removed)") and the log.
   For an older day, from this repository's folder:
     node --no-warnings backup/export_csv.mjs "<path of that day's .sql file>"
 

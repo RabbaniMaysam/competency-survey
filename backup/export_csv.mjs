@@ -2,7 +2,7 @@
 //   node --no-warnings backup/export_csv.mjs [dump.sql]
 // Without an argument it reads the newest dump in ..\backups\competency-survey. The files go to
 // ..\backups\competency-survey\csv\ and replace the previous set; to see an older day, run it on that day's dump.
-// Per class: the answers (the columns of the Responses tab's "Download CSV") and the log.
+// Per class: the answers (the columns of the Responses tab's "Download CSV", with the goals chosen) and the log.
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -34,19 +34,21 @@ mkdirSync(out, { recursive: true });
 
 for (const row of all('SELECT key, state FROM classes ORDER BY key')) {
   const k = row.key, s = sv.upgrade(JSON.parse(row.state));
-  const resp = all('SELECT round, email, answers, saved, submitted FROM responses WHERE class = ? ORDER BY round, email', k)
-    .map(r => Object.assign({}, r, { answers: JSON.parse(r.answers || '{}') }));
+  // a dump written before 2026-10-09 has no goals column
+  const resp = all('SELECT * FROM responses WHERE class = ? ORDER BY round, email', k)
+    .map(r => Object.assign({}, r, { answers: JSON.parse(r.answers || '{}'), goals: JSON.parse(r.goals || '[]') }));
   const people = s.roster.map(r => ({ r, email: r.email, gone: false }));
   resp.forEach(x => { if (!people.some(p => p.email === x.email)) people.push({ r: null, email: x.email, gone: true }); });
   // the survey's questions, then removed ones that have an answer ("(removed)" in the header); 'na' is the sixth option
   const cols = sv.allItems(s).filter(i => !i.retired || resp.some(x => i.id in x.answers));
-  const rows = [['Last name', 'First name', 'Email', 'On roster', 'Survey', 'Status', 'Submitted', 'Last change']
+  const goalNames = x => s.survey.blocks.filter(b => sv.goalsOf(s, x).indexOf(b.id) !== -1).map(b => b.name).join('; ');
+  const rows = [['Last name', 'First name', 'Email', 'On roster', 'Survey', 'Status', 'Submitted', 'Last change', 'Goals']
     .concat(cols.map(i => i.blockName + ': ' + i.name + (i.retired ? ' (removed)' : '')))];
   people.forEach(p => s.rounds.forEach(r => {
     const x = resp.find(y => y.round === r.id && y.email === p.email);
     if (!x && p.gone) return;
     rows.push([p.r ? p.r.last : '', p.r ? p.r.first : '', p.email, p.gone ? 'no' : 'yes', r.name,
-      !x ? 'not started' : x.submitted ? 'submitted' : 'started', x ? isoFull(x.submitted) : '', x ? isoFull(x.saved) : '']
+      !x ? 'not started' : x.submitted ? 'submitted' : 'started', x ? isoFull(x.submitted) : '', x ? isoFull(x.saved) : '', x ? goalNames(x) : '']
       .concat(cols.map(i => { const v = x ? x.answers[i.id] : undefined; return v === undefined ? '' : v === 'na' ? 'NA' : v; })));
   }));
   write(safe(k) + '_answers.csv', rows);

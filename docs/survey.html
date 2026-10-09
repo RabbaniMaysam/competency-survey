@@ -73,7 +73,57 @@
     button.link { border: 0; background: none; color: var(--accent); padding: 0; text-decoration: underline; font: inherit; cursor: pointer; }
     button.pick { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent); background: #fff; color: var(--accent); cursor: pointer; margin: 6px 6px 0 0; }
     ul.status { margin: 8px 0 0; padding-left: 20px; }
+    ul.status button.link { margin-left: 6px; }
     #signin { margin-top: 16px; }
+
+    /* ---- the results page after Submit: each competency's score on a 1-to-5 track, then the goals card */
+    .card > p.lead { margin: 0 0 6px; }
+    .rows { margin-top: 18px; }
+    .srow { display: grid; grid-template-columns: 170px 1fr; align-items: center; gap: 6px 18px; padding: 14px 0 22px; }
+    .srow + .srow { border-top: 1px solid rgba(0, 0, 0, .07); }
+    .srow .lab { font-weight: 700; line-height: 1.25; }
+    .srow .lab .sub { display: block; font-weight: 400; font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase; padding: 2px 7px; border-radius: 10px;
+           background: #4a3322; color: #fff; margin-left: 6px; vertical-align: 2px; }
+    .tag.prev { background: #fff; color: #4a3322; border: 1px solid #4a3322; }
+    /* the track: a bar from 1 to 5 with a tick and a label at each level; the marker slides to the score */
+    .track { position: relative; height: 10px; margin: 14px 18px 20px; border-radius: 5px; background: linear-gradient(90deg, #e3ddd3, #cfdceb); }
+    .tick { position: absolute; top: -4px; width: 2px; height: 18px; margin-left: -1px; background: rgba(31, 35, 40, .22); border-radius: 1px; }
+    .tlab { position: absolute; top: 18px; transform: translateX(-50%); font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .mark { position: absolute; top: 50%; left: 0; width: 38px; height: 38px; margin: -19px 0 0 -19px; border-radius: 50%; background: var(--accent); color: #fff;
+            font-weight: 700; font-size: 14px; line-height: 38px; text-align: center; box-shadow: 0 3px 10px rgba(11, 92, 173, .4); border: 2px solid #fff;
+            transition: left .9s cubic-bezier(.2, .8, .2, 1); z-index: 2; }
+    .mark.prev { width: 16px; height: 16px; margin: -8px 0 0 -8px; background: #fff; border: 2.5px solid #4a3322; box-shadow: none; z-index: 1; }
+    .span { position: absolute; top: 50%; height: 4px; margin-top: -2px; background: #4a3322; opacity: .45; border-radius: 2px; transition: left .9s cubic-bezier(.2, .8, .2, 1), width .9s cubic-bezier(.2, .8, .2, 1); }
+    .track .none { position: absolute; left: 0; top: -9px; font-size: 14px; color: var(--muted); font-style: italic; background: rgba(255, 255, 255, .7); padding: 3px 8px; border-radius: 6px; }
+    .legend { font-size: 13px; color: var(--muted); margin-top: 6px; }
+    .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -1px; margin: 0 4px 0 10px; }
+    .legend i.now { background: var(--accent); }
+    .legend i.was { background: #fff; border: 2px solid #4a3322; width: 9px; height: 9px; }
+    @media (max-width: 560px) {
+      .srow { grid-template-columns: 1fr; gap: 2px; padding: 12px 0 20px; }
+      .tlab.mid { display: none; }
+    }
+    /* the goals card appears after the scores have settled */
+    .card.goals { opacity: 0; transform: translateY(14px); transition: opacity .7s ease, transform .7s ease; }
+    .card.goals.show { opacity: 1; transform: none; }
+    .chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; margin-top: 14px; }
+    .chip { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; border: 2px solid var(--line); background: #fff; color: var(--ink);
+            font: inherit; font-weight: 600; text-align: left; cursor: pointer; transition: transform .08s, background .12s, border-color .12s; }
+    .chip:hover { border-color: #a9b8c8; transform: translateY(-1px); }
+    .chip .n { flex: 1; }
+    .chip .sc { font-size: 13px; font-weight: 600; color: var(--muted); background: #f0f2f5; padding: 2px 8px; border-radius: 10px; }
+    .chip .ck { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); flex: none; text-align: center; line-height: 18px; font-size: 14px; color: transparent; }
+    .chip.on { background: #4a3322; border-color: #4a3322; color: #fff; }
+    .chip.on .sc { background: rgba(255, 255, 255, .18); color: #fff; }
+    .chip.on .ck { background: #fff; border-color: #fff; color: #4a3322; }
+    .chip:disabled { opacity: .45; cursor: default; transform: none; }
+    .goalrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 16px; }
+    .goalrow .count { color: var(--muted); flex: 1; }
+    button.go.brown { background: #4a3322; }
+    .chosen { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+    .chosen li { padding: 8px 14px; border-radius: 12px; background: #4a3322; color: #fff; font-weight: 600; }
+    .after { margin-top: 18px; }
   </style>
 </head>
 <body>
@@ -92,6 +142,10 @@
   var roundId = '';         // the round being answered
   var draft = {};           // its answers as the student picks them: {itemId: 1..5, or 'na' (the sixth option)}
   var saving = false, dirty = false, saveTimer = null, savedAt = '', saveError = '', showMissing = false, done = '';
+  var view = '';            // '' = the survey form; 'results' = the results page of a submitted round (scores and goals)
+  var goalDraft = null;     // the sections being chosen as goals on the results page (null: not editing)
+  var goalsBusy = false, goalsNote = '', goalsSkipped = false, revealTimer = null;
+  var animateResults = true;  // the markers slide to the scores the first time the results page is drawn
   // The token is kept in localStorage: the Worker's session token (sent after a Google sign-in) lasts months. "Sign out" deletes it.
   try { token = localStorage.getItem(TOKEN_KEY) || ''; } catch (e) {}
   tokenFromHash();
@@ -155,6 +209,8 @@
         roundId = pick ? pick.id : '';
         draft = pick ? Object.assign({}, pick.answers) : {};
         savedAt = pick ? pick.saved : '';
+        // a submitted survey opens on its results page
+        view = pick && pick.submitted ? 'results' : ''; goalDraft = null; goalsNote = ''; animateResults = true;
       }
       render(); schedule();
     }).catch(function (e) { if (e.message !== 'SIGNIN') { flash = 'The page could not load. ' + e.message; render(); } });
@@ -218,6 +274,7 @@
       saving = false; dirty = false; S = s; showMissing = false;
       savedAt = cur().saved;
       done = again ? 'Your changes are submitted.' : 'Thank you. Your answers are submitted.';
+      view = 'results'; goalDraft = null; goalsNote = ''; goalsSkipped = false; animateResults = true;
       render();
       window.scrollTo(0, 0);
     }).catch(function (e) {
@@ -350,6 +407,14 @@
 
     var r = cur();
     var open = S.rounds.filter(function (x) { return x.open; });
+    clearTimeout(revealTimer);
+    // the results page of a submitted survey (open or closed): the scores, then the goals
+    if (view === 'results' && r && r.submitted) {
+      bar.hidden = true;
+      if (done) app.appendChild(el('div', { class: 'banner ok', text: done }));
+      app.appendChild(resultsView(r));
+      return;
+    }
     if (!r || !r.open) {
       bar.hidden = true;
       app.appendChild(el('div', { class: 'standby', text: 'No survey is open right now. Your instructor will tell you when it opens.' }));
@@ -361,13 +426,18 @@
       open.forEach(function (x) {
         if (x.id !== r.id) picks.appendChild(el('button', { class: 'pick', text: 'Switch to ' + x.name, on: { click: function () {
           if (dirty) save();
-          roundId = x.id; draft = Object.assign({}, x.answers); savedAt = x.saved; done = ''; showMissing = false; render();
+          roundId = x.id; draft = Object.assign({}, x.answers); savedAt = x.saved; done = ''; showMissing = false;
+          view = x.submitted ? 'results' : ''; goalDraft = null; goalsNote = ''; animateResults = true; render();
         } } }));
       });
       app.appendChild(picks);
     }
     app.appendChild(el('h2', { style: 'margin-top:14px', text: S.heading + ': ' + r.name.toLowerCase() }));
     if (done) app.appendChild(el('div', { class: 'banner ok', text: done }));
+    if (r.submitted) app.appendChild(el('p', {}, el('button', { class: 'link', text: 'Back to my results', on: { click: function () {
+      if (dirty && !confirm('Your changed answers are not submitted yet. Leave them?')) return;
+      dirty = false; draft = Object.assign({}, r.answers); view = 'results'; animateResults = true; render(); window.scrollTo(0, 0);
+    } } })));
     if (S.needCode && !r.started) {
       bar.hidden = true;
       app.appendChild(codeCard(r));
@@ -440,9 +510,153 @@
   function statusList() {
     var ul = el('ul', { class: 'status' });
     S.rounds.forEach(function (x) {
-      ul.appendChild(el('li', { text: x.name + ': ' + (x.submitted ? 'submitted ' + when(x.submitted) : x.saved ? 'started, not submitted' : 'not taken') }));
+      ul.appendChild(el('li', { text: x.name + ': ' + (x.submitted ? 'submitted ' + when(x.submitted) + '.' : x.saved ? 'started, not submitted' : 'not taken') },
+        x.submitted ? el('button', { class: 'link', text: 'See my results', on: { click: function () {
+          roundId = x.id; draft = Object.assign({}, x.answers); savedAt = x.saved; done = ''; view = 'results'; goalDraft = null; goalsNote = ''; animateResults = true; render(); window.scrollTo(0, 0);
+        } } }) : null));
     });
     return el('div', { class: 'card' }, el('b', { text: 'Your surveys' }), ul);
+  }
+
+  // ---------------------------------------------------------------- the results page
+
+  function f1(v) { return v === null || v === undefined ? '' : (Math.round(v * 10) / 10).toFixed(1); }
+  function pos(v) { return ((v - 1) / (S.levels.length - 1) * 100) + '%'; }
+  function names(ids) { return S.blocks.filter(function (b) { return ids.indexOf(b.id) !== -1; }).map(function (b) { return b.name; }); }
+
+  /**
+   * The results page of a submitted round: a card with the student's score in each section on a track from 1 to 5
+   * (the end-of-semester page also shows the start-of-semester score), then, once the markers have settled, the goals card.
+   */
+  function resultsView(r) {
+    var box = el('div');
+    var isEnd = r.id !== S.rounds[0].id, first = S.rounds[0];
+    var before = {};
+    if (isEnd && first.submitted) first.scores.forEach(function (x) { before[x.id] = x; });
+    var hasBefore = Object.keys(before).length > 0;
+    var many = (S.unit && S.unit.many || 'competencies').toLowerCase(), one = (S.unit && S.unit.one || 'competency').toLowerCase();
+    var L = S.levels.length;
+    box.appendChild(el('h2', { style: 'margin-top:14px', text: S.heading + ': ' + r.name.toLowerCase() }));
+
+    var card = el('div', { class: 'card compA' }, el('h2', { text: 'Where you stand' }));
+    card.appendChild(el('p', { class: 'lead', text: isEnd
+      ? 'Your score in each ' + one + ' today, from your answers' + (hasBefore ? ', next to where you stood at the start of the semester.' : '.')
+      : 'Your score in each ' + one + ' is the average of your answers to its questions, from 1 (' + S.levels[0] + ') to ' + L + ' (' + S.levels[L - 1] + '). There is no good or bad score: it is where you start.' }));
+    var rows = el('div', { class: 'rows' });
+    var marks = [];
+    r.scores.forEach(function (x, k) {
+      var lab = el('div', { class: 'lab' }, x.name);
+      if (r.goals.indexOf(x.id) !== -1) lab.appendChild(el('span', { class: 'tag', text: isEnd ? 'goal' : 'your goal' }));
+      else if (isEnd && first.goals.indexOf(x.id) !== -1) lab.appendChild(el('span', { class: 'tag prev', text: 'goal at the start' }));
+      if (x.na) lab.appendChild(el('span', { class: 'sub', text: x.na + (x.na === 1 ? ' question' : ' questions') + ': ' + S.naLabel.toLowerCase() }));
+      var track = el('div', { class: 'track', role: 'img', 'aria-label': x.name + ': ' + (x.score === null ? S.naLabel : f1(x.score) + ' of ' + L) });
+      S.levels.forEach(function (t, i) {
+        track.appendChild(el('span', { class: 'tick', style: 'left:' + pos(i + 1) }));
+        track.appendChild(el('span', { class: 'tlab' + (i > 0 && i < L - 1 ? ' mid' : ''), style: 'left:' + pos(i + 1), text: (i + 1) + ' ' + t }));
+      });
+      var b = before[x.id];
+      if (x.score === null) track.appendChild(el('span', { class: 'none', text: S.naLabel }));
+      else {
+        if (b && b.score !== null) {
+          var lo = Math.min(b.score, x.score), hi = Math.max(b.score, x.score);
+          var span = el('span', { class: 'span', style: 'left:0%; width:0%' });
+          track.appendChild(span);
+          track.appendChild(el('span', { class: 'mark prev', title: 'Start of semester: ' + f1(b.score) }));
+          marks.push({ e: span, left: pos(lo), width: ((hi - lo) / (L - 1) * 100) + '%', k: k });
+          marks.push({ e: track.lastChild, left: pos(b.score), k: k });
+        }
+        var m = el('span', { class: 'mark', text: f1(x.score), style: 'transition-delay:' + (k * 90) + 'ms' });
+        track.appendChild(m);
+        marks.push({ e: m, left: pos(x.score), k: k });
+      }
+      rows.appendChild(el('div', { class: 'srow' }, lab, track));
+    });
+    card.appendChild(rows);
+    if (hasBefore) card.appendChild(el('p', { class: 'legend' }, el('i', { class: 'now' }), 'today', el('i', { class: 'was' }), 'start of the semester'));
+    box.appendChild(card);
+    // The first time, the markers slide from the left end to the scores once the card is on the page; later
+    // redraws (a goal chosen, a save) place them at once.
+    var place = function () { marks.forEach(function (m) { m.e.style.left = m.left; if (m.width) m.e.style.width = m.width; }); };
+    if (animateResults) requestAnimationFrame(function () { requestAnimationFrame(place); }); else place();
+
+    // The goals card appears after the markers have settled; at once when goals are chosen, the student was choosing,
+    // or the survey is closed. (Decided before the card is drawn: drawing it in edit mode starts the draft.)
+    var soon = !animateResults || r.goals.length || !r.open || goalDraft !== null || goalsSkipped;
+    // The goals card is redrawn on its own as the student picks, so the scores above do not move.
+    var goals = goalsCard(r, isEnd, many, one, redraw);
+    function redraw() { var g = goalsCard(cur(), isEnd, many, one, redraw); g.classList.add('show'); goals.replaceWith(g); goals = g; }
+    box.appendChild(goals);
+    revealTimer = setTimeout(function () { goals.classList.add('show'); }, soon ? 30 : 1800);
+    animateResults = false;
+
+    box.appendChild(el('p', { class: 'after muted' }, r.open ? 'Want to look at your answers again? ' : 'This survey is closed. ',
+      el('button', { class: 'link', text: r.open ? 'Review or change my answers' : 'See my answers', on: { click: function () {
+        view = ''; goalDraft = null; render(); window.scrollTo(0, 0);
+      } } }), '.'));
+    return box;
+  }
+
+  /** The goals card: choose up to S.goalsMax sections to improve (while the round is open), or the sections chosen. redraw: redraws the card. */
+  function goalsCard(r, isEnd, many, one, redraw) {
+    var card = el('div', { class: 'card compB goals' });
+    var max = S.goalsMax || 3;
+    var editing = r.open && (goalDraft !== null || (!r.goals.length && !goalsSkipped));
+    if (!editing) {
+      card.appendChild(el('h2', { text: isEnd ? 'Your goals' : 'Your goals for this semester' }));
+      if (r.goals.length) {
+        card.appendChild(el('p', { class: 'lead', text: goalsNote || 'The ' + many + ' you chose to work on:' }));
+        var ul = el('ul', { class: 'chosen' });
+        names(r.goals).forEach(function (n) { ul.appendChild(el('li', { text: n })); });
+        card.appendChild(ul);
+        if (r.open) card.appendChild(el('p', { style: 'margin-top:12px' }, el('button', { class: 'link', text: 'Change my goals', on: { click: function () { goalDraft = r.goals.slice(); goalsNote = ''; redraw(); } } })));
+      } else if (r.open) {
+        card.appendChild(el('p', { class: 'lead' }, 'You have not chosen goals yet. You can while the survey is open. ',
+          el('button', { class: 'link', text: 'Choose my goals', on: { click: function () { goalsSkipped = false; goalDraft = []; redraw(); } } })));
+      } else card.appendChild(el('p', { class: 'lead muted', text: 'You did not choose goals while the survey was open.' }));
+      return card;
+    }
+    if (goalDraft === null) goalDraft = r.goals.slice();
+    card.appendChild(el('h2', { text: isEnd ? 'What next?' : 'Where do you want to grow?' }));
+    card.appendChild(el('p', { class: 'lead', text: 'Skills grow fastest where you decide to practice them. ' + (isEnd
+      ? 'Choose up to ' + max + ' ' + many + ' you want to keep working on after this class.'
+      : 'Choose up to ' + max + ' ' + many + ' you want to improve this semester; your instructor will see your choices.') }));
+    var chips = el('div', { class: 'chips', role: 'group', 'aria-label': 'Choose up to ' + max }), count, go;
+    var full = function () { return goalDraft.length >= max; };
+    r.scores.forEach(function (x) {
+      var on = goalDraft.indexOf(x.id) !== -1;
+      chips.appendChild(el('button', { type: 'button', class: 'chip' + (on ? ' on' : ''), disabled: !on && full(), 'aria-pressed': on ? 'true' : 'false', on: { click: function () {
+        var i = goalDraft.indexOf(x.id);
+        if (i !== -1) goalDraft.splice(i, 1); else if (!full()) goalDraft.push(x.id);
+        goalsNote = ''; redraw();
+      } } }, el('span', { class: 'ck', text: '✓' }), el('span', { class: 'n', text: x.name }), x.score === null ? null : el('span', { class: 'sc', text: f1(x.score) })));
+    });
+    card.appendChild(chips);
+    var n = goalDraft.length;
+    count = el('span', { class: 'count', text: n === 0 ? 'Tap up to ' + max + ' ' + many + '.' : n + ' of ' + max + ' chosen' + (n === max ? '.' : '; you can pick ' + (max - n) + ' more.') });
+    go = el('button', { class: 'go brown', text: goalsBusy ? 'Saving...' : 'Save my goals', disabled: !!(goalsBusy || (!n && !r.goals.length)), on: { click: function () { saveGoals(r, redraw); } } });
+    var row = el('div', { class: 'goalrow' }, count, go);
+    if (r.goals.length) row.appendChild(el('button', { class: 'link', text: 'Cancel', on: { click: function () { goalDraft = null; redraw(); } } }));
+    else row.appendChild(el('button', { class: 'link', text: 'Not now', on: { click: function () { goalDraft = null; goalsNote = ''; goalsSkipped = true; redraw(); } } }));
+    card.appendChild(row);
+    if (goalsNote) card.appendChild(el('div', { class: 'banner err', text: goalsNote }));
+    return card;
+  }
+
+  /** Saves the chosen goals; the whole results page is then redrawn (the goal tags beside the scores change), without the slide. */
+  function saveGoals(r, redraw) {
+    if (goalsBusy) return;
+    goalsBusy = true; goalsNote = ''; redraw();
+    var chosen = goalDraft.slice();
+    api('goals', [r.id, chosen]).then(function (s) {
+      goalsBusy = false; S = s; goalDraft = null;
+      goalsNote = chosen.length ? 'Saved. The ' + (chosen.length === 1 ? 'area' : 'areas') + ' you chose to work on:' : '';
+      done = ''; render();
+    }).catch(function (e) {
+      goalsBusy = false;
+      if (e.message === 'SIGNIN') return;
+      goalsNote = e.message; redraw();
+      if (/closed/.test(e.message)) load();
+    });
   }
 
   function renderBar() {

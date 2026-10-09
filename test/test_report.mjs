@@ -37,13 +37,13 @@ sv.ADMIN.importRoster(s, 'first,last,email\nAmy,Zed,az@x.edu\nBo,Abe,bo@x.edu\nC
 const items = sv.activeItems(s).map(i => i.id);
 const fill = (level, except) => { const o = {}; items.forEach(id => { o[id] = level; }); Object.assign(o, except || {}); return o; };
 const rows = [
-  { round: 'start', email: 'az@x.edu', answers: fill(1, { 'career.strengths': 3 }), submitted: '2026-09-02T00:00:00Z' },  // an id of the removed survey
-  { round: 'start', email: 'bo@x.edu', answers: fill(2), submitted: '2026-09-02T00:00:00Z' },
-  { round: 'start', email: 'cy@x.edu', answers: fill(3, { 'career2.strengths': 2 }), submitted: '2026-09-02T00:00:00Z' },
-  { round: 'start', email: 'di@x.edu', answers: fill(1), submitted: '' },                        // started, not submitted
-  { round: 'start', email: 'gone@x.edu', answers: fill(4), submitted: '2026-09-02T00:00:00Z' },  // not on the roster
+  { round: 'start', email: 'az@x.edu', answers: fill(1, { 'career.strengths': 3 }), submitted: '2026-09-02T00:00:00Z', goals: ['career2', 'thinking2'] },  // an id of the removed survey
+  { round: 'start', email: 'bo@x.edu', answers: fill(2), submitted: '2026-09-02T00:00:00Z', goals: ['teamwork2'] },  // a goal of the competency turned off
+  { round: 'start', email: 'cy@x.edu', answers: fill(3, { 'career2.strengths': 2 }), submitted: '2026-09-02T00:00:00Z', goals: ['career2'] },
+  { round: 'start', email: 'di@x.edu', answers: fill(1), submitted: '', goals: ['career2'] },                        // started, not submitted
+  { round: 'start', email: 'gone@x.edu', answers: fill(4), submitted: '2026-09-02T00:00:00Z', goals: ['career2'] },  // not on the roster
   { round: 'start', email: 'ed@x.edu', answers: fill(2, { 'teamwork2.share': 5 }), submitted: '2026-09-02T00:00:00Z' },  // a competency turned off
-  { round: 'end', email: 'az@x.edu', answers: fill(3, { 'career2.strengths': 5 }), submitted: '2026-12-02T00:00:00Z' },
+  { round: 'end', email: 'az@x.edu', answers: fill(3, { 'career2.strengths': 5 }), submitted: '2026-12-02T00:00:00Z', goals: ['technology2'] },
   { round: 'end', email: 'bo@x.edu', answers: fill(2, { 'career2.strengths': 4, 'thinking2.parts': 1 }), submitted: '2026-12-02T00:00:00Z' },
   { round: 'end', email: 'di@x.edu', answers: fill(4), submitted: '2026-12-02T00:00:00Z' }
 ];
@@ -51,7 +51,7 @@ const R = report(s, rows);
 ok(R.rounds.length === 2 && R.rounds[0].submitted === 4 && R.rounds[0].started === 1 && R.rounds[0].outside === 1 && R.rounds[0].roster === 5
   && R.rounds[1].submitted === 3 && R.rounds[1].started === 0, 'rounds: submitted on the roster, started, outside the roster');
 ok(R.pairs.both === 2 && R.pairs.startOnly === 2 && R.pairs.endOnly === 1, 'pairs: 2 students in both, 2 start only, 1 end only');
-ok(R.competencies.length === 5 && R.items.length === 15 && !R.items.some(i => i.comp === 'teamwork2') && R.levels.length === 5 && !('version' in R) && R.hasNa === false && R.unit.many === 'Competencies' && R.naLabel === 'No chance to try', 'teamwork left out; five levels; no sixth option');
+ok(R.competencies.length === 5 && R.items.length === 15 && !R.items.some(i => i.comp === 'teamwork2') && R.levels.length === 5 && !('version' in R) && R.hasNa === false && R.unit.many === 'Competencies' && R.naLabel === 'Didn\'t have a chance to try', 'teamwork left out; five levels; no sixth option');
 
 // career2.strengths: start az 1, bo 2, cy 2, ed 2 -> n 4, mean 7/4; end az 5, bo 4, di 4 -> n 3, mean 13/3
 const cs = R.items.find(i => i.id === 'career2.strengths');
@@ -80,6 +80,16 @@ ok(R.students.length === 5 && R.students.map(x => x.email).join() === 'bo@x.edu,
 const az = R.students.find(x => x.email === 'az@x.edu'), di = R.students.find(x => x.email === 'di@x.edu');
 ok(near(az.start.overall, 1) && near(az.end.overall, 47 / 15) && near(az.change, 32 / 15) && az.start.submitted && near(az.start.comps.career2, 1) && !('na' in az.start), 'a student\'s scores in both rounds');
 ok(di.start === null && near(di.end.overall, 4) && di.change === null, 'a student with one round has no change');
+
+// goals: az chose career and thinking at the start (technology at the end), cy career; bo's teamwork goal is of the
+// competency turned off; di (not submitted) and gone (off the roster) do not count
+ok(R.rounds[0].goals === 2 && R.rounds[1].goals === 1, 'rounds: students who chose at least one goal');
+ok(car.goals.start === 2 && car.goals.end === 0 && th.goals.start === 1 && R.competencies.find(c => c.code === 'technology2').goals.end === 1
+  && R.competencies.every(c => c.code === 'career2' || c.code === 'thinking2' || c.goals.start === 0), 'goals per competency and round');
+// career change among those who chose it at the start: az 1 -> 11/3; among the others: bo 2 -> 8/3
+ok(car.goalChange.n === 1 && near(car.goalChange.before, 1) && near(car.goalChange.after, 11 / 3) && car.otherChange.n === 1 && near(car.otherChange.mean, 2 / 3), 'the change of the students who chose the goal and of the others');
+ok(th.goalChange.n === 1 && th.goalChange.up === 1 && th.otherChange.n === 1 && th.otherChange.down === 1, 'thinking: the chooser rose, the other fell');
+ok(az.start.goals.join() === 'thinking2,career2' && az.end.goals.join() === 'technology2' && R.students.find(x => x.email === 'bo@x.edu').start.goals.length === 0 && di.end.goals.length === 0, 'a student\'s goals per round, in the survey\'s order, without a competency turned off');
 
 // a stored value outside the scale is not counted
 const odd = report(s, [{ round: 'start', email: 'az@x.edu', answers: fill(2, { 'career2.strengths': 7 }), submitted: '2026-09-02T00:00:00Z' }]);

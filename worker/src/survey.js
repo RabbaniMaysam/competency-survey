@@ -14,12 +14,13 @@
  * A new class starts with the default survey (items.js) or a copy of another class's survey and settings.
  * A round is open while open is true and its closing time (if any) has not passed.
  * A student's answers to a round are one row of the responses table: answers = {itemId: a level, 1 to 5, or 'na'},
- * saved = time of the last change, submitted = time of the first complete submission ('' before it).
+ * saved = time of the last change, submitted = time of the first complete submission ('' before it),
+ * goals = [section ids] the student chose to improve (up to GOALS_MAX, after submitting; the results page).
  * Answers to questions removed from the survey are kept.
  */
 
 import { canonEmail, parseRoster } from './roster.js';
-import { defaultSurvey } from './items.js';
+import { defaultSurvey, NA_LABEL, NA_LABEL_OLD } from './items.js';
 
 export const ROUNDS = [{ id: 'start', name: 'Start of semester' }, { id: 'end', name: 'End of semester' }];
 
@@ -89,6 +90,7 @@ export function upgrade(s) {
     defaultSurvey().blocks.filter(b => !s.survey.blocks.some(x => x.id === b.id))
       .forEach(b => b.items.forEach(i => s.retired.push({ id: i.id, blockName: b.name, name: i.name, text: i.text })));
   }
+  if (s.survey.naLabel === NA_LABEL_OLD) s.survey.naLabel = NA_LABEL;
   delete s.off;
   delete s.version;
   if (typeof s.code !== 'boolean') s.code = true;
@@ -137,9 +139,47 @@ export function cleanAnswers(s, raw) {
 /** The survey's questions without a valid answer. */
 export const missing = (s, answers) => activeItems(s).filter(i => !answers || !(i.id in answers) || !validAnswer(s, i, answers[i.id]));
 
+// ---------------------------------------------------------------- the student's results and goals
+
+/** How many sections a student may choose as goals on the results page. */
+export const GOALS_MAX = 3;
+
 /**
- * What the student page shows. rows: this student's responses [{round, answers (object), saved, submitted}].
- * Each round's answers are those valid for the survey as it is now.
+ * A student's score in each section of the survey: the mean of the student's answers on the scale to its questions
+ * (as in the report), or null when none is on the scale. [{id, name, score, n: answers on the scale, na: sixth-option answers}]
+ */
+export function blockScores(s, answers) {
+  const a = answers || {};
+  return s.survey.blocks.map(b => {
+    const v = b.items.filter(i => i.id in a && a[i.id] !== 'na' && validAnswer(s, i, a[i.id])).map(i => Number(a[i.id]));
+    const na = b.items.filter(i => a[i.id] === 'na' && i.na).length;
+    return { id: b.id, name: b.name, score: v.length ? v.reduce((t, x) => t + x, 0) / v.length : null, n: v.length, na: na };
+  });
+}
+
+/** The stored goals of a response row that are sections of the survey now (an array of ids, in the survey's order). */
+export function goalsOf(s, row) {
+  const g = Array.isArray(row && row.goals) ? row.goals : [];
+  return s.survey.blocks.map(b => b.id).filter(id => g.indexOf(id) !== -1);
+}
+
+/** The goals a student sends, checked: distinct section ids of the survey, at most GOALS_MAX. Throws when not. */
+export function cleanGoals(s, raw) {
+  const list = Array.isArray(raw) ? raw.map(x => String(x ?? '').trim()) : null;
+  if (!list) throw new Error('The goals must be a list of sections.');
+  const ids = s.survey.blocks.map(b => b.id);
+  const out = [];
+  list.forEach(id => {
+    if (ids.indexOf(id) === -1) throw new Error('"' + id + '" is not a section of the survey.');
+    if (out.indexOf(id) === -1) out.push(id);
+  });
+  if (out.length > GOALS_MAX) throw new Error('Choose at most ' + GOALS_MAX + ' ' + s.survey.unit.many.toLowerCase() + '.');
+  return ids.filter(id => out.indexOf(id) !== -1);
+}
+
+/**
+ * What the student page shows. rows: this student's responses [{round, answers (object), saved, submitted, goals}].
+ * Each round's answers are those valid for the survey as it is now; scores and goals are the results page's.
  */
 export function studentView(s, email, rows, ms) {
   const me = student(s, email);
@@ -150,15 +190,19 @@ export function studentView(s, email, rows, ms) {
   return {
     authorized: true, email: me.email, name: fullName(me), title: s.title,
     // the survey's heading, scale, and texts
-    heading: sv.heading, levels: sv.levels, naLabel: sv.naLabel, instruction: sv.instruction, prompt: sv.prompt,
+    heading: sv.heading, levels: sv.levels, naLabel: sv.naLabel, instruction: sv.instruction, prompt: sv.prompt, unit: sv.unit,
     needCode: !!s.code,  // a round is started by typing the session code; a round with a stored row is started
     codeSec: codeSec(s), // seconds between codes (shown in the code field's label)
+    goalsMax: GOALS_MAX,
     // blocks: [{id, name, items: [{id, name, text, na}]}]
     blocks: sv.blocks.map(b => ({ id: b.id, name: b.name, items: b.items.map(i => ({ id: i.id, name: i.name || i.text, text: i.text, na: !!i.na })) })),
     rounds: s.rounds.map(r => {
       const row = mine(r.id);
+      const answers = row ? valid(row.answers) : {};
       return { id: r.id, name: r.name, open: isOpen(r, ms), closes: r.closes, started: !!row, intro: (sv.intro && sv.intro[r.id]) || '',
-               answers: row ? valid(row.answers) : {}, saved: row ? row.saved : '', submitted: row ? row.submitted : '' };
+               answers: answers, saved: row ? row.saved : '', submitted: row ? row.submitted : '',
+               // the results page: the student's score per section (of the submitted answers) and the sections chosen as goals
+               scores: row && row.submitted ? blockScores(s, answers) : [], goals: goalsOf(s, row) };
     })
   };
 }

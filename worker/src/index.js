@@ -3,7 +3,7 @@
  * The pages in docs/ (GitHub Pages) call it. See README.md.
  *
  *   GET  /config  -> {clientId, classes, sessions}      public, needed before sign-in
- *   POST /survey  -> student page: {token, class, action: 'state' | 'unlock' | 'save' | 'submit', args: [round, answers or code]} -> {ok, state}
+ *   POST /survey  -> student page: {token, class, action: 'state' | 'unlock' | 'save' | 'submit' | 'goals', args: [round, answers, code, or goals]} -> {ok, state}
  *   POST /admin   -> instructor page: {token, class, action, args}                                           -> {ok, data}
  *
  * Settings and roster are one JSON row per class (classes); each student's answers to a round are one
@@ -172,14 +172,15 @@ const shownState = s => { const o = Object.assign({}, s); delete o.secret; retur
 const writeClass = (env, key, s) => env.DB.prepare('UPDATE classes SET state = ? WHERE key = ?').bind(JSON.stringify(s), key).run();
 const logRow = (env, key, actor, action, detail) => env.DB.prepare(LOG_SQL)
   .bind(new Date().toISOString(), key, actor, action, String(detail || '').slice(0, 2000)).run();
-const parseRow = r => Object.assign({}, r, { answers: JSON.parse(r.answers || '{}') });
+const parseJson = (t, dflt) => { try { return JSON.parse(t || '') ?? dflt; } catch (e) { return dflt; } };
+const parseRow = r => Object.assign({}, r, { answers: parseJson(r.answers, {}), goals: parseJson(r.goals, []) });
 
 // ---------------------------------------------------------------- student page
 
 async function studentCall(env, real, action, key, args) {
   const s = await readClass(env, key);
   const now = Date.now();
-  const mineSql = 'SELECT round, answers, saved, submitted FROM responses WHERE class = ? AND email = ?';
+  const mineSql = 'SELECT round, answers, saved, submitted, goals FROM responses WHERE class = ? AND email = ?';
   try {
     if (action === 'unlock') {
       // The student types the session code shown on the instructor's screen; a row with no answers starts the round.
@@ -215,6 +216,17 @@ async function studentCall(env, real, action, key, args) {
       // Saves of a draft are not logged one by one: the first one ("start") and every submission are.
       if (!prev) await logRow(env, key, real, 'start', r.name);
       if (action === 'submit') await logRow(env, key, real, prev && prev.submitted ? 'submit changes' : 'submit', r.name);
+    } else if (action === 'goals') {
+      // The results page: the sections the student chose to improve (up to GOALS_MAX), after submitting, while the round is open.
+      if (!sv.student(s, real)) throw new Error('This account is not on the class roster.');
+      const r = sv.round(s, args[0]);
+      if (!sv.isOpen(r, now)) throw new Error('The ' + r.name.toLowerCase() + ' survey is closed.');
+      const goals = sv.cleanGoals(s, args[1]);
+      const res = await env.DB.prepare("UPDATE responses SET goals = ? WHERE class = ? AND round = ? AND email = ? AND submitted != ''")
+        .bind(JSON.stringify(goals), key, r.id, real).run();
+      if (!res.meta.changes) throw new Error('Submit the survey first.');
+      const names = s.survey.blocks.filter(b => goals.indexOf(b.id) !== -1).map(b => b.name);
+      await logRow(env, key, real, 'choose goals', r.name + ': ' + (names.join(', ') || 'none'));
     } else if (action !== 'state') throw new Error('Unknown action.');
   } catch (err) {
     await logRow(env, key, real, 'refused: ' + action, err.message);
@@ -298,7 +310,7 @@ async function adminDo(env, real, who, action, key, args) {
 
   const s = await readClass(env, key);
   const name = e => { const r = sv.student(s, e); return r ? sv.fullName(r) + ' (' + e + ')' : e; };
-  const allRows = async () => (await env.DB.prepare('SELECT round, email, answers, saved, submitted FROM responses WHERE class = ? ORDER BY round, email').bind(key).all()).results.map(parseRow);
+  const allRows = async () => (await env.DB.prepare('SELECT round, email, answers, saved, submitted, goals FROM responses WHERE class = ? ORDER BY round, email').bind(key).all()).results.map(parseRow);
 
   // Everything stored about the class, for a full download.
   if (action === 'export') {

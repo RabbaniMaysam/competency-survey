@@ -14,9 +14,14 @@
  *   change:               for students who submitted both rounds (an item: answered in both), before and after =
  *                         the two means, mean and sd of the differences, a paired t-test (t, two-sided p), and the
  *                         counts of students who rose, stayed, and fell.
+ *   goals:                per competency and round, the number of submitted students who chose it as a goal on the
+ *                         results page; per round (rounds[].goals), the students who chose at least one; and per
+ *                         competency goalChange / otherChange, the change (as above) of the students who chose it at
+ *                         the start and of those who did not.
  */
 
 import { LEVELS } from './items.js';
+import { goalsOf } from './survey.js';
 
 const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 const sd = a => { if (a.length < 2) return null; const m = mean(a); return Math.sqrt(a.reduce((t, x) => t + (x - m) * (x - m), 0) / (a.length - 1)); };
@@ -83,7 +88,7 @@ export function betai(a, b, x) {
 export const tTwoSided = (t, df) => betai(df / 2, 0.5, df / (df + t * t));
 
 /**
- * The report of a class. rows: every response row [{round, email, answers (object), submitted}].
+ * The report of a class. rows: every response row [{round, email, answers (object), submitted, goals}].
  * Returns {levels, naLabel, hasNa, unit, rounds, competencies, items, overall, pairs, students}; see the file comment
  * for the statistics. hasNa: a question offers the sixth option or a counted answer is 'na' (the page then shows its column).
  * Answers to question ids not in the survey (removed questions) are ignored.
@@ -105,6 +110,7 @@ export function report(s, rows) {
     sub[r.id].forEach(x => { byMail[r.id][x.email] = x; scores[r.id][x.email] = scoresOf(x); });
     return { id: r.id, name: r.name, roster: s.roster.length, submitted: sub[r.id].length,
              started: mine.filter(x => !x.submitted && onRoster[x.email]).length, outside: mine.filter(x => x.submitted && !onRoster[x.email]).length,
+             goals: sub[r.id].filter(x => goalsOf(s, x).length).length,
              openedAt: r.openedAt || '', closedAt: r.open ? '' : (r.closedAt || r.closes || '') };
   });
   // a submitted response's scores: per competency and overall the mean of the answers
@@ -115,6 +121,7 @@ export function report(s, rows) {
   }
   const [A, B] = ids;
   const both = sub[A].map(x => x.email).filter(e => byMail[B][e]);
+  const chose = (r, e, code) => goalsOf(s, byMail[r][e]).indexOf(code) !== -1;
   const answersTo = (id, list) => list.map(x => level(x.answers[id])).filter(v => v !== null);
   const naTo = (id, list) => list.filter(x => x.answers[id] === 'na').length;
   const naSum = (list, r) => list.reduce((t, i) => t + naTo(i.id, sub[r]), 0);
@@ -125,16 +132,20 @@ export function report(s, rows) {
     items: items.map(i => Object.assign({ id: i.id, comp: i.comp, compName: i.compName, name: i.name, text: i.text, na: i.na },
       perRound(r => Object.assign(answerStat(answersTo(i.id, sub[r]), L), { na: naTo(i.id, sub[r]) })),
       { change: paired(both.map(e => [level(byMail[A][e].answers[i.id]), level(byMail[B][e].answers[i.id])]).filter(p => p.every(v => v !== null))) })),
-    competencies: comps.map(c => Object.assign({ code: c.code, name: c.name, itemIds: c.items.map(i => i.id) },
-      perRound(r => scoreStat(sub[r].map(x => scores[r][x.email].comps[c.code]).filter(v => v !== null), c.items.flatMap(i => answersTo(i.id, sub[r])), L, naSum(c.items, r))),
-      { change: paired(both.map(e => [scores[A][e].comps[c.code], scores[B][e].comps[c.code]]).filter(p => p.every(v => v !== null))) })),
+    competencies: comps.map(c => {
+      const pairsOf = list => paired(list.map(e => [scores[A][e].comps[c.code], scores[B][e].comps[c.code]]).filter(p => p.every(v => v !== null)));
+      return Object.assign({ code: c.code, name: c.name, itemIds: c.items.map(i => i.id) },
+        perRound(r => scoreStat(sub[r].map(x => scores[r][x.email].comps[c.code]).filter(v => v !== null), c.items.flatMap(i => answersTo(i.id, sub[r])), L, naSum(c.items, r))),
+        { change: pairsOf(both), goals: perRound(r => sub[r].filter(x => chose(r, x.email, c.code)).length),
+          goalChange: pairsOf(both.filter(e => chose(A, e, c.code))), otherChange: pairsOf(both.filter(e => !chose(A, e, c.code))) });
+    }),
     overall: Object.assign(
       perRound(r => scoreStat(sub[r].map(x => scores[r][x.email].overall).filter(v => v !== null), items.flatMap(i => answersTo(i.id, sub[r])), L, naSum(items, r))),
       { change: paired(both.map(e => [scores[A][e].overall, scores[B][e].overall]).filter(p => p.every(v => v !== null))) }),
     // one row per student on the roster with a submitted survey: the scores of each round and the overall change
     students: s.roster.filter(r => ids.some(id => byMail[id][r.email])).map(r => {
       const o = { first: r.first, last: r.last, email: r.email };
-      ids.forEach(id => { const x = byMail[id][r.email]; o[id] = x ? Object.assign({ submitted: x.submitted }, scores[id][r.email]) : null; });
+      ids.forEach(id => { const x = byMail[id][r.email]; o[id] = x ? Object.assign({ submitted: x.submitted, goals: goalsOf(s, x) }, scores[id][r.email]) : null; });
       o.change = o[A] && o[B] && o[A].overall !== null && o[B].overall !== null ? o[B].overall - o[A].overall : null;
       return o;
     })
