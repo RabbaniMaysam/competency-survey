@@ -159,6 +159,17 @@ ok(v.rounds[0].scores.length === 0 && v.rounds[0].goals.length === 0 && v.rounds
   const four = JSON.parse(JSON.stringify(q.survey)); four.blocks[0].items.push({ id: '', text: 'A fourth question.', advice: 'Do it.' }); sv.ADMIN.saveSurvey(q, four);
   const id4 = q.survey.blocks[0].items[3].id;
   ok(sv.adviceItems(q, Object.assign({}, a, { [id4]: 2 })).communication2.ids.length === sv.ADVICE_MAX, 'at most 3 questions per section');
+  // the advice turned off: the student page receives neither the advice texts nor the choice; the texts stay stored
+  q.roster = [{ first: 'A', last: 'B', email: 'a@x.edu' }];
+  const row = [{ round: 'start', answers: a, saved: 'x', submitted: 'x', goals: [] }];
+  ok(q.survey.showAdvice === true && sv.studentView(q, 'a@x.edu', row, T0).showAdvice === true && Object.keys(sv.studentView(q, 'a@x.edu', row, T0).rounds[0].advice).length === 6, 'the advice is shown by default');
+  const offA = JSON.parse(JSON.stringify(q.survey)); offA.showAdvice = false;
+  const dOff = sv.ADMIN.saveSurvey(q, offA), vOff = sv.studentView(q, 'a@x.edu', row, T0);
+  ok(q.survey.showAdvice === false && dOff.adviceShown === 'off' && dOff.advised.length === 0 && vOff.showAdvice === false && Object.keys(vOff.rounds[0].advice).length === 0
+    && vOff.blocks.every(b => b.items.every(i => i.advice === '')) && q.survey.blocks[4].items[0].advice === 'Placeholder advice 5.1', 'advice turned off: none sent, the texts kept');
+  const onA = JSON.parse(JSON.stringify(q.survey)); delete onA.showAdvice;
+  ok(sv.ADMIN.saveSurvey(q, onA).adviceShown === 'on' && q.survey.showAdvice === true, 'a survey sent without the setting shows the advice');
+  ok(sv.upgrade({ title: 'x' }).survey.showAdvice === true && sv.upgrade({ title: 'x', survey: Object.assign(sv.newClass('y', T0).survey, { showAdvice: false }) }).survey.showAdvice === false, 'upgrade: on unless turned off');
 }
 ok(sv.studentView(s, 'stranger@x.edu', [], T0).authorized === false && !('rounds' in sv.studentView(s, 'stranger@x.edu', [], T0)), 'a stranger sees nothing');
 ok(v.needCode === true && v.rounds[0].started === true && v.rounds[1].started === false, 'student view: session code needed, a round with a stored row is started');

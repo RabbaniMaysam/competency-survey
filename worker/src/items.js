@@ -68,11 +68,11 @@ export const TEXTS = {
 
 /**
  * The default survey in the form a class stores it (state.survey; see survey.js): the texts, the five levels, the
- * sixth option's label, the word for a section, and the sections with their questions (no question has the sixth option).
+ * sixth option's label, the word for a section, the advice shown, and the sections with their questions (no question has the sixth option).
  */
 export function defaultSurvey() {
   return { heading: TEXTS.title, intro: { start: TEXTS.intro.start, end: TEXTS.intro.end }, instruction: TEXTS.instruction, prompt: TEXTS.prompt,
-           levels: LEVELS.slice(), naLabel: NA_LABEL, unit: { one: UNIT.one, many: UNIT.many },
+           levels: LEVELS.slice(), naLabel: NA_LABEL, unit: { one: UNIT.one, many: UNIT.many }, showAdvice: true,
            blocks: COMPETENCIES.map((c, bk) => ({ id: c.code, name: c.name,
              items: c.dims.map((d, ik) => ({ id: c.code + '.' + d.code, text: d.text, advice: placeholderAdvice(bk + 1, ik + 1), na: false })) })) };
 }

@@ -358,7 +358,8 @@ async function adminDo(env, real, who, action, key, args) {
     const list = (what, items) => (items.length ? [what + ': ' + items.map(i => i.blockName + ': ' + i.name).join(', ')] : []);
     const parts = [].concat(list('added', d.added), list('removed', d.removed), list('reworded', d.reworded), list('advice changed', d.advised),
       list('sixth option added', d.naOn), list('sixth option removed', d.naOff),
-      d.order ? ['sections or order changed'] : [], d.texts ? ['texts changed'] : [], d.scale ? ['scale labels changed'] : []);
+      d.order ? ['sections or order changed'] : [], d.texts ? ['texts changed'] : [], d.scale ? ['scale labels changed'] : [],
+      d.adviceShown ? ['advice to students turned ' + d.adviceShown] : []);
     logs.push(['save questions', sv.activeItems(s).length + ' questions in ' + s.survey.blocks.length + ' sections; ' + (parts.join('; ') || 'no change')]);
   } else if (action === 'openRound') {
     sv.ADMIN.openRound(s, args[0], args[1], now);

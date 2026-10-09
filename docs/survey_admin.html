@@ -103,6 +103,7 @@
     .qhandle:hover, .qhandle:focus-visible { color: var(--accent); }
     .qhandle.off { opacity: .4; cursor: default; }
     .dragging { opacity: .4; }
+    .noadvice textarea.qadv, .noadvice .qcols > span:last-child { opacity: .45; }
     .qmark { height: 0; border-top: 3px solid var(--accent); border-radius: 2px; margin: -1px 0; }
     @media (max-width: 760px) {
       .qitem { grid-template-columns: 18px 24px minmax(0, 1fr); }
@@ -843,8 +844,14 @@
     texts.appendChild(el('p', { class: 'muted', style: 'margin:8px 0 0', text: 'The student page shows the heading, the introduction of the survey being answered, the instruction, then each section as "name: ' + (Q.prompt || '...') + '" above its questions. The section word is used on this page and in the report.' }));
     card.appendChild(texts);
 
+    // whether the results page shows the advice (when off, the advice boxes stay editable but are dimmed)
+    var secs = el('div', { class: 'qsecs' + (Q.showAdvice === false ? ' noadvice' : '') }), secsEnd = el('div');
+    var tipsOn = el('input', { type: 'checkbox' }); tipsOn.checked = Q.showAdvice !== false;
+    tipsOn.addEventListener('change', function () { Q.showAdvice = tipsOn.checked; secs.classList.toggle('noadvice', !tipsOn.checked); edited(); });
+    card.appendChild(el('div', { class: 'row', style: 'margin-top:12px' }, el('label', {}, tipsOn, el('b', { text: 'Show the advice to students' })),
+      el('span', { class: 'muted', text: 'on the results page, under the ' + U.many.toLowerCase() + ' they chose as goals. Unticked: students choose goals and see no advice; the advice below stays stored.' })));
+
     // the sections and their questions
-    var secs = el('div', { class: 'qsecs' }), secsEnd = el('div');
     Q.blocks.forEach(function (b, bk) {
       var sec = el('div', { class: 'qsec' });
       var n = b.items.reduce(function (t, i) { return t + (counts[i.id] || 0); }, 0);
@@ -915,6 +922,7 @@
     else if (JSON.stringify(A.map(function (i) { return i.id; })) !== JSON.stringify(B.map(function (i) { return i.id; }))) lines.push('Questions reordered.');
     if (JSON.stringify(a.levels) !== JSON.stringify(b.levels) || a.naLabel !== b.naLabel) lines.push('Answer options: ' + b.levels.join(', ') + '; sixth option: ' + b.naLabel + '.');
     if (['heading', 'instruction', 'prompt'].some(function (k) { return a[k] !== b[k]; }) || JSON.stringify(a.intro) !== JSON.stringify(b.intro) || JSON.stringify(a.unit) !== JSON.stringify(b.unit)) lines.push('Texts of the student page or the section word changed.');
+    if ((a.showAdvice !== false) !== (b.showAdvice !== false)) lines.push(b.showAdvice !== false ? 'Advice to students turned on: the results page shows it under the chosen goals.' : 'Advice to students turned off: the results page shows none.');
     if (!lines.length) lines.push('Spacing of the texts changed.');
     return lines;
   }

@@ -9,7 +9,8 @@
  *     secret: random string the codes derive from,
  *     rounds: [{id: 'start' | 'end', name, open: bool, closes: ISO time or '', openedAt, closedAt}] }
  *   survey = { heading, intro: {start, end}, instruction, prompt, levels: [five labels, 1 to 5], naLabel: the sixth
- *              option's label, unit: {one, many} (what a section is called), blocks: [{id, name, items: [{id, text, advice, na}]}] }
+ *              option's label, unit: {one, many} (what a section is called), showAdvice: whether the results page shows
+ *              the advice (true by default), blocks: [{id, name, items: [{id, text, advice, na}]}] }
  *   An item's text is the statement students rate (also its label in the report); advice: what the results page shows a
  *   student who chose the item's section as a goal and rated the item low (adviceItems); na: the item offers the sixth option.
  *   (Items had a short label, `name`, until 2026-10-09; upgrade drops it.)
@@ -99,6 +100,7 @@ export function upgrade(s) {
     if (typeof i.advice !== 'string') i.advice = placeholderAdvice(bk + 1, ik + 1);
   }));
   s.retired.forEach(r => { delete r.name; });
+  if (typeof s.survey.showAdvice !== 'boolean') s.survey.showAdvice = true;
   if (s.survey.naLabel === NA_LABEL_OLD) s.survey.naLabel = NA_LABEL;
   delete s.off;
   delete s.version;
@@ -213,7 +215,7 @@ export function studentView(s, email, rows, ms) {
   const me = student(s, email);
   if (!me) return { authorized: false, email: email, title: s.title };
   const mine = id => (rows || []).find(r => r.round === id) || null;
-  const items = activeItems(s), sv = s.survey;
+  const items = activeItems(s), sv = s.survey, tips = sv.showAdvice !== false;  // tips: the advice is shown (else none is sent)
   const valid = a => { const o = {}; items.forEach(i => { if (a && i.id in a && validAnswer(s, i, a[i.id])) o[i.id] = a[i.id]; }); return o; };
   return {
     authorized: true, email: me.email, name: fullName(me), title: s.title,
@@ -221,9 +223,9 @@ export function studentView(s, email, rows, ms) {
     heading: sv.heading, levels: sv.levels, naLabel: sv.naLabel, instruction: sv.instruction, prompt: sv.prompt, unit: sv.unit,
     needCode: !!s.code,  // a round is started by typing the session code; a round with a stored row is started
     codeSec: codeSec(s), // seconds between codes (shown in the code field's label)
-    goalsMax: GOALS_MAX,
-    // blocks: [{id, name, items: [{id, name (the text), text, advice, na}]}]
-    blocks: sv.blocks.map(b => ({ id: b.id, name: b.name, items: b.items.map(i => ({ id: i.id, name: i.text, text: i.text, advice: i.advice || '', na: !!i.na })) })),
+    goalsMax: GOALS_MAX, showAdvice: tips,
+    // blocks: [{id, name, items: [{id, name (the text), text, advice ('' when the advice is turned off), na}]}]
+    blocks: sv.blocks.map(b => ({ id: b.id, name: b.name, items: b.items.map(i => ({ id: i.id, name: i.text, text: i.text, advice: tips ? i.advice || '' : '', na: !!i.na })) })),
     rounds: s.rounds.map(r => {
       const row = mine(r.id);
       const answers = row ? valid(row.answers) : {};
@@ -232,7 +234,7 @@ export function studentView(s, email, rows, ms) {
                // the results page: the student's score per section (of the submitted answers), the sections chosen as
                // goals, and the questions whose advice is shown for each section (adviceItems)
                scores: row && row.submitted ? blockScores(s, answers) : [], goals: goalsOf(s, row),
-               advice: row && row.submitted ? adviceItems(s, answers) : {} };
+               advice: tips && row && row.submitted ? adviceItems(s, answers) : {} };
     })
   };
 }
@@ -269,6 +271,7 @@ export function cleanSurvey(raw, s) {
     naLabel: field(o.naLabel, LIMITS.level, 'The sixth option', true),
     unit: { one: field(o.unit && o.unit.one, LIMITS.unit, 'The word for one section', true),
             many: field(o.unit && o.unit.many, LIMITS.unit, 'The word for several sections', true) },
+    showAdvice: o.showAdvice !== false,
     blocks: []
   };
   const labels = out.levels.concat(out.naLabel).map(l => l.toLowerCase());
@@ -299,7 +302,8 @@ export function cleanSurvey(raw, s) {
 
 /**
  * What changes from survey a to survey b: questions added, removed, reworded (text changed), with changed advice, and given
- * or deprived of the sixth option (lists of items, as surveyItems), and whether the sections' order or names, the texts, or the scale changed.
+ * or deprived of the sixth option (lists of items, as surveyItems), and whether the sections' order or names, the texts, or the scale changed;
+ * adviceShown: 'on' or 'off' when the advice on the results page was turned on or off, else ''.
  */
 export function surveyDiff(a, b) {
   const A = surveyItems(a), B = surveyItems(b);
@@ -312,7 +316,8 @@ export function surveyDiff(a, b) {
     naOn: B.filter(i => i.na && !(inA(i.id) && inA(i.id).na)), naOff: both.filter(i => !i.na && inA(i.id).na),
     order: JSON.stringify(A.map(i => i.id)) !== JSON.stringify(B.map(i => i.id)) || JSON.stringify(a.blocks.map(x => x.name)) !== JSON.stringify(b.blocks.map(x => x.name)),
     texts: ['heading', 'instruction', 'prompt'].some(k => a[k] !== b[k]) || JSON.stringify(a.intro) !== JSON.stringify(b.intro) || JSON.stringify(a.unit) !== JSON.stringify(b.unit),
-    scale: JSON.stringify(a.levels) !== JSON.stringify(b.levels) || a.naLabel !== b.naLabel
+    scale: JSON.stringify(a.levels) !== JSON.stringify(b.levels) || a.naLabel !== b.naLabel,
+    adviceShown: (a.showAdvice !== false) === (b.showAdvice !== false) ? '' : b.showAdvice !== false ? 'on' : 'off'
   };
 }
 
