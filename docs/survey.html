@@ -617,9 +617,10 @@
     }
     if (goalDraft === null) goalDraft = r.goals.slice();
     card.appendChild(el('h2', { text: isEnd ? 'What next?' : 'Where do you want to grow?' }));
-    card.appendChild(el('p', { class: 'lead', text: 'Skills grow fastest where you decide to practice them. ' + (isEnd
-      ? 'Choose up to ' + max + ' ' + many + ' you want to keep working on after this class.'
-      : 'Choose up to ' + max + ' ' + many + ' you want to improve this semester; your instructor will see your choices.') }));
+    card.appendChild(el('p', { class: 'lead', text: isEnd
+      ? 'A skill keeps improving after a class ends if you keep practicing it. Choose up to ' + max + ' ' + many + ' you want to keep working on.'
+      : 'Skills improve through deliberate practice, and this semester offers many chances for it. Choose up to ' + max + ' ' + many
+        + ' to focus on, and use your classes and projects to practice them. Your instructor will see your choices.' }));
     var chips = el('div', { class: 'chips', role: 'group', 'aria-label': 'Choose up to ' + max }), count, go;
     var full = function () { return goalDraft.length >= max; };
     r.scores.forEach(function (x) {
