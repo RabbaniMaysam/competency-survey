@@ -35,8 +35,12 @@ Daily dump into Google Drive
   For an older day, from this repository's folder:
     node --no-warnings backup/export_csv.mjs "<path of that day's .sql file>"
 
-  Scheduled task "competency-survey backup" starts it daily at 03:20 (and on
-  the next start-up if the PC was off; not on battery). Manage it in Task
+  Scheduled task "competency-survey backup" starts it daily at 03:20, 12:20,
+  and 18:20 with -IfMissing, which stops the script at once when that day's
+  dump exists, so a night run that failed or did not start is redone the same
+  day. A start missed while the PC was off runs at the next start-up; not on
+  battery. history.log in the backup folder has one line per run that
+  exported (saved or FAILED); a manual run without -IfMissing always exports. Manage it in Task
   Scheduler, or:
     schtasks /Query /TN "competency-survey backup"
     schtasks /Run   /TN "competency-survey backup"
