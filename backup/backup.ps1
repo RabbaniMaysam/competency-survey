@@ -1,6 +1,6 @@
 # Daily backup of the competency survey database (classes, responses, log).
 # Writes a full SQL dump to backups\competency-survey\ in the tools folder that contains this repository
-# (F:\GDriveMay\Maysam\01_online_tools\backups\competency-survey), which lives in Google Drive and is never committed.
+# (F:\GDriveMay\Maysam\01_software\online\backups\competency-survey), which lives in Google Drive and is never committed.
 # Restore one with:  npx wrangler d1 execute competency-survey --remote --file "<that folder>\<file>.sql"
 # Registered as a Windows scheduled task "competency-survey backup" (see backup/README.txt).
 # -IfMissing: stop at once when today's dump exists. The scheduled task passes it and starts the script

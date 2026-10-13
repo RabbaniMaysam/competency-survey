@@ -12,7 +12,7 @@ Where the data lives
 Daily dump into Google Drive
   backup.ps1 exports the whole database as SQL into backups\competency-survey\
   of the tools folder that contains this repository
-  (F:\GDriveMay\Maysam\01_online_tools\backups\competency-survey). That folder
+  (F:\GDriveMay\Maysam\01_software\online\backups\competency-survey). That folder
   is in Google Drive, so the dumps are synced, and it is outside the
   repository, so they never reach the public repository. The newest 90 dumps
   are kept, plus the first dump of every month, which is never deleted.
